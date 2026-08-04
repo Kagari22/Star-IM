@@ -1,0 +1,16 @@
+# Go 本地缓存与构建产物
+.gocache/
+.gomodcache/
+*.exe
+
+# Node 依赖
+node_modules/
+frontend/node_modules/
+
+# 本地工具、日志和敏感配置
+.cph/
+.docx-venv/
+*.log
+.env
+.env.*
+!.env.example
