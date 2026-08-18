@@ -1,145 +1,69 @@
-# IM Chat System
+# Star-IM · 星讯
 
-一个使用 Go 与 Gin 实现的即时通讯示例项目。它提供用户认证、单聊、WebSocket 实时推送、离线消息、文件上传和消息搜索，并将 MySQL、Redis、RabbitMQ、MinIO 与 Elasticsearch 组合到一套可本地运行的服务中。配套的“星讯”前端使用 Vue 3 + Vite 构建。
+即时通讯系统：Go + Vue 3，支持单聊、群聊，内置带联网搜索能力的 AI 聊天好友。
 
 ## 功能
 
-- 用户注册、登录、登出与 JWT 身份认证
-- 单聊文本消息与 WebSocket 实时推送
-- 会话历史与离线消息拉取
-- Redis 未读消息计数、在线状态、Token 黑名单和限流
-- 图片、文件上传与 MinIO 临时访问链接
-- RabbitMQ 异步消息事件与 Outbox 可靠投递
-- Elasticsearch 消息关键词与颜文字/特殊字符搜索
-- 可选 AI 聊天机器人：通过 OpenAI 兼容接口（DeepSeek / 通义千问 / OpenAI / 本地 Ollama）接入，机器人作为好友自动回复，并支持联网搜索实时信息
-- “星讯”Vue 3 + Vite 前端：欢迎页、三栏单聊工作台、搜索、上传与离线同步
+- 单聊 / 群聊 / 好友与社交关系
+- **AI 好友**：联网搜索（实时新闻）、实时天气、日期时间查询
+- WebSocket 实时推送，Outbox + RabbitMQ 可靠消息投递
+- Elasticsearch 消息全文搜索
+- 图片/文件上传（MinIO）、离线消息、未读数、消息回执
 
 ## 技术栈
 
-| 类别 | 技术 |
-| --- | --- |
-| 服务端 | Go 1.22、Gin、Gorilla WebSocket |
-| 主数据 | MySQL 8 |
-| 即时状态 | Redis 7 |
-| 异步事件 | RabbitMQ 3 |
-| 文件存储 | MinIO |
-| 搜索 | Elasticsearch 8 |
-| 本地编排 | Docker Compose |
-| 前端 | Vue 3、Vite、CSS 动效 |
-
-## 架构
-
-~~~text
-浏览器
-  │ HTTP / WebSocket
-  ▼
-Handler / chat.Hub
-  ▼
-AuthService / MessageService
-  ├── MySQL：用户、消息、Outbox 事件
-  ├── Redis：在线状态、未读数、限流、Token 黑名单
-  └── MinIO：文件对象存储
-
-MySQL Outbox
-  ▼
-Outbox Dispatcher
-  ▼
-RabbitMQ message.created
-  ├── 节点消费者 → WebSocket 实时推送
-  └── 搜索消费者 → Elasticsearch 建立消息索引
-~~~
-
-消息先与 Outbox 事件在同一 MySQL 事务中写入，再由后台任务发布 RabbitMQ。这样即使 RabbitMQ 短暂不可用，已保存的消息也不会丢失，之后仍可重试发布。
-
-## 项目结构
-
-~~~text
-cmd/server/                    程序入口
-internal/app/                  依赖装配、Gin 路由、健康检查与关闭逻辑
-internal/auth/                 密码哈希与 JWT
-internal/chat/                 WebSocket Hub、Client、读写协程
-internal/config/               环境变量配置与校验
-internal/handler/              HTTP Handler、认证和限流中间件
-internal/httpx/                JSON 响应辅助函数
-internal/model/                User、Message 领域模型
-internal/mq/                   RabbitMQ 发布者、消费者及事件类型
-internal/outbox/               Outbox 调度与重试
-internal/presence/             在线状态接口与 Redis 实现
-internal/ratelimit/            限流接口与 Redis 实现
-internal/repository/           Repository 接口与 MySQL 实现
-internal/search/               搜索接口与 Elasticsearch 实现
-internal/service/              认证和消息业务逻辑
-internal/storage/              文件存储接口与 MinIO 实现
-internal/tokenblacklist/       Token 黑名单接口与 Redis 实现
-internal/unread/               未读数接口与 Redis 实现
-db/schema.sql                  初始数据库结构
-db/migrations/                 数据库迁移脚本
-scripts/                       本地开发脚本
-frontend/                      Vue 3 + Vite 前端源码
-web/                           Vite 生产构建产物，由 Go 静态托管
-~~~
+Go (Gin) · Vue 3 (Vite) · MySQL · Redis · RabbitMQ · MinIO · Elasticsearch
 
 ## 快速开始
 
-### 前置条件
+前置条件：Go 1.22+、Docker Desktop（Linux 容器模式）、PowerShell。
 
-- Go 1.22 或更高版本
-- Docker Desktop，且已启动 Linux container engine
-- Windows PowerShell
+**一键启动**（自动拉起 MySQL/Redis/RabbitMQ/MinIO/Elasticsearch 并运行服务）：
 
-### 一键启动
-
-在项目根目录执行：
-
-~~~powershell
+```powershell
 .\scripts\Start-Dev.ps1 -WithInfra
-~~~
+```
 
-脚本会按以下顺序执行：
+基础设施已在运行时，只启动服务：
 
-1. 加载开发环境变量；
-2. 启动 MySQL、Redis、RabbitMQ、MinIO、Elasticsearch；
-3. 等待每个基础设施就绪；
-4. 执行数据库结构脚本；
-5. 运行 Go 服务。
-
-启动成功后，打开：
-
-- 应用页面：http://127.0.0.1:8080
-- 健康检查：http://127.0.0.1:8080/healthz
-- RabbitMQ 管理页：http://127.0.0.1:15674
-- MinIO Console：http://127.0.0.1:19001
-
-### 只启动 Go 服务
-
-若基础设施已经在运行：
-
-~~~powershell
+```powershell
 .\scripts\Start-Dev.ps1
-~~~
+```
 
-也可以手动加载环境变量后运行：
+启动后访问 **http://127.0.0.1:8080**，注册账号即可使用。
 
-~~~powershell
-. .\scripts\Set-DevEnv.ps1
-go run .\cmd\server
-~~~
+### 启用 AI 联网搜索好友
 
-### 停止基础设施
+先设置 DeepSeek API Key，再启动：
 
-~~~powershell
-docker compose down
-~~~
+```powershell
+$env:IM_AI_API_KEY = "你的 DeepSeek API Key"
+.\scripts\Start-Dev.ps1
+```
 
-该命令不会删除 Docker volume 中的数据。若需要清空容器数据，请先确认目标后再自行执行带 volume 的 Docker 清理命令。
+新注册用户会自动与「AI 好友」成为好友，可直接聊天；老用户重启服务后好友列表也会自动出现 AI 好友。
 
-### 重置数据库
+### 常用命令
 
-~~~powershell
-.\scripts\Reset-Db.ps1
-~~~
+| 操作 | 命令 |
+| --- | --- |
+| 停止基础设施 | `docker compose down` |
+| 重置数据库（清空数据） | `.\scripts\Reset-Db.ps1` |
+| 构建前端（输出到 web/） | `cd frontend && npm run build` |
+| 运行测试 | `go test ./...` |
 
-该脚本会重建本地 im_chat 数据库，原有数据库数据会丢失。
+## 主要配置
+
+完整配置见 `scripts/Set-DevEnv.ps1`（开发默认值）。常用 AI 相关变量：
+
+| 环境变量 | 默认值 | 说明 |
+| --- | --- | --- |
+| `IM_AI_ENABLED` | true | AI 好友开关 |
+| `IM_AI_API_KEY` | 空 | DeepSeek API Key（必填） |
+| `IM_AI_BASE_URL` | https://api.deepseek.com/v1 | OpenAI 兼容接口地址 |
+| `IM_AI_MODEL` | deepseek-chat | 模型名称 |
+| `IM_AI_ENABLE_SEARCH` | true | 联网搜索开关（仅 DeepSeek 支持） |
+| `IM_AI_BOT_NICKNAME` | AI 好友 | 机器人昵称 |
 
 ## 默认端口
 
@@ -148,334 +72,24 @@ docker compose down
 | 应用 | http://127.0.0.1:8080 |
 | MySQL | 127.0.0.1:13306 |
 | Redis | 127.0.0.1:16379 |
-| RabbitMQ AMQP | 127.0.0.1:15673 |
-| RabbitMQ 管理页 | http://127.0.0.1:15674 |
-| MinIO API | 127.0.0.1:19000 |
-| MinIO Console | http://127.0.0.1:19001 |
+| RabbitMQ | 15673（AMQP）/ 15674（管理页） |
+| MinIO | 19000（API）/ 19001（Console） |
 | Elasticsearch | http://127.0.0.1:19200 |
 
-## 配置
-
-开发环境脚本会设置以下默认值。生产环境应通过部署平台的环境变量覆盖敏感配置，尤其是 JWT、数据库和 MinIO 凭据。
-
-| 环境变量 | 默认值 | 说明 |
-| --- | --- | --- |
-| IM_ADDR | :8080 | HTTP 服务监听地址 |
-| IM_NODE_ID | node-1 | 当前应用节点标识 |
-| IM_ENV | development | 运行环境 |
-| IM_JWT_SECRET | 开发用长密钥 | JWT 签名密钥，至少 32 个字符 |
-| IM_TOKEN_TTL_HOURS | 168 | JWT 有效期，单位小时 |
-| IM_ALLOWED_ORIGINS | http://127.0.0.1:8080,http://localhost:8080,http://127.0.0.1:5173,http://localhost:5173 | WebSocket Origin 白名单，含 Vite 开发地址 |
-| IM_MAX_UPLOAD_BYTES | 10485760 | 单个上传文件最大大小，默认 10 MiB |
-| IM_MYSQL_DSN | root:123456@tcp(127.0.0.1:13306)/im_chat?... | MySQL DSN |
-| IM_REDIS_ADDR | 127.0.0.1:16379 | Redis 地址 |
-| IM_ENABLE_RABBITMQ | true | 是否启用 RabbitMQ |
-| IM_RABBITMQ_URL | amqp://guest:guest@127.0.0.1:15673/ | RabbitMQ 地址 |
-| IM_ENABLE_MINIO | true | 是否启用 MinIO |
-| IM_MINIO_ENDPOINT | 127.0.0.1:19000 | MinIO 地址 |
-| IM_MINIO_BUCKET | im-chat | MinIO Bucket 名称 |
-| IM_ENABLE_ELASTICSEARCH | true | 是否启用 Elasticsearch |
-| IM_ELASTICSEARCH_URL | http://127.0.0.1:19200 | Elasticsearch 地址 |
-| IM_ELASTICSEARCH_INDEX | messages | 消息索引名称 |
-| IM_AI_ENABLED | false | 是否启用 AI 聊天机器人 |
-| IM_AI_BASE_URL | https://api.deepseek.com/v1 | OpenAI 兼容接口地址 |
-| IM_AI_API_KEY | 空 | API Key，本地 Ollama 可为空 |
-| IM_AI_MODEL | deepseek-chat | 模型名称 |
-| IM_AI_BOT_USERNAME | ai_assistant | 机器人账号用户名 |
-| IM_AI_BOT_NICKNAME | AI 好友 | 机器人昵称 |
-| IM_AI_CONTEXT_MSGS | 20 | 携带的最近历史消息条数 |
-| IM_AI_TIMEOUT_SECS | 60 | 单次调用超时秒数 |
-| IM_AI_ENABLE_SEARCH | true | 是否启用联网搜索（走 DeepSeek /responses + web_search） |
-
-注意：
-
-- 启用 Elasticsearch 时必须同时启用 RabbitMQ，因为消息通过事件异步建立索引。
-- Origin 不允许使用通配符。
-- 生产环境启用 MinIO 时必须使用 TLS 和非默认凭据。
-
-## HTTP API
-
-除注册和登录外，接口都需要请求头：
-
-~~~text
-Authorization: Bearer <JWT>
-~~~
-
-所有成功响应均为 JSON；错误响应格式为：
-
-~~~json
-{"error":"错误说明"}
-~~~
-
-### 认证
-
-| 方法 | 路径 | 说明 |
-| --- | --- | --- |
-| POST | /api/register | 注册用户，按客户端 IP 限流 |
-| POST | /api/login | 登录并取得 JWT，按客户端 IP 限流 |
-| POST | /api/logout | 登出并将当前 JWT 加入黑名单 |
-| GET | /api/me | 获取当前用户信息 |
-
-注册请求：
-
-~~~json
-{
-  "username": "alice",
-  "password": "password123",
-  "nickname": "Alice"
-}
-~~~
-
-登录请求：
-
-~~~json
-{
-  "username": "alice",
-  "password": "password123"
-}
-~~~
-
-登录响应：
-
-~~~json
-{
-  "token": "<JWT>",
-  "user": {
-    "id": 1,
-    "username": "alice",
-    "nickname": "Alice",
-    "created_at": "2026-07-28T00:00:00Z"
-  }
-}
-~~~
-
-### 用户与消息
-
-| 方法 | 路径 | 查询参数 | 说明 |
-| --- | --- | --- | --- |
-| GET | /api/users | 无 | 获取其他用户及对应未读数 |
-| GET | /api/messages | peer_id、after_id、limit | 获取与指定用户的会话历史 |
-| GET | /api/offline | after_id、limit | 获取当前用户的离线消息 |
-
-其中 limit 默认 50，最大 100。after_id 可用于增量拉取。
-
-### 媒体上传
-
-| 方法 | 路径 | 说明 |
-| --- | --- | --- |
-| POST | /api/media/upload | 上传文件并创建一条媒体消息 |
-
-请求类型为 multipart/form-data：
-
-~~~text
-to_user_id=<接收者用户 ID>
-file=<文件>
-~~~
-
-允许的内容类型：
-
-- image/jpeg
-- image/png
-- image/gif
-- image/webp
-- application/pdf
-- text/plain
-
-服务端会校验真实内容类型，并限制文件大小。媒体消息中的 object_url 是短期有效的 MinIO 预签名访问链接。
-
-### 搜索
-
-| 方法 | 路径 | 查询参数 | 说明 |
-| --- | --- | --- | --- |
-| GET | /api/search/messages | q、peer_id、limit | 搜索当前用户有权限查看的消息 |
-
-- q 最多 64 个 Unicode 字符；
-- peer_id 可选，用于限定某个会话；
-- limit 默认 50，最大 50；
-- 搜索结果来自 Elasticsearch，消息刚保存后可能需要等待异步索引完成。
-- 消息内容同时保存全文索引与原始字符字段，因此可搜索颜文字和特殊符号，例如 ^、^(*￣(oo)￣)^。
-
-首次启动更新后的服务时，会自动为已有 Elasticsearch 文档补齐原始字符字段；数据量较大时该过程可能需要少量时间。
-
-## WebSocket 协议
-
-连接地址：
-
-~~~text
-ws://127.0.0.1:8080/ws
-~~~
-
-浏览器需要将 JWT 放入 WebSocket 子协议列表：
-
-~~~javascript
-const ws = new WebSocket(
-  "ws://127.0.0.1:8080/ws",
-  ["im-chat", token]
-);
-~~~
-
-服务端会验证：
-
-1. Token 是否存在、有效且未被拉黑；
-2. 浏览器 Origin 是否在 IM_ALLOWED_ORIGINS 白名单中；
-3. 当前用户的消息发送频率是否超限。
-
-客户端发送文本消息：
-
-~~~json
-{
-  "type": "chat",
-  "to": 2,
-  "content": "你好"
-}
-~~~
-
-服务端下行消息：
-
-~~~json
-{
-  "type": "ack",
-  "message": {
-    "id": 101,
-    "from_id": 1,
-    "to_id": 2,
-    "content_type": "text",
-    "content": "你好",
-    "created_at": "2026-07-28T00:00:00Z"
-  }
-}
-~~~
-
-type 字段含义：
-
-| type | 含义 |
-| --- | --- |
-| ack | 发送者的消息已成功保存 |
-| chat | 接收者收到一条实时聊天消息 |
-| error | 协议、限流或保存错误 |
-
-服务端会定期发送 Ping；浏览器会自动回复 Pong，以检测失效连接并维持 Redis 在线状态。
-
-## 消息流转
-
-~~~text
-发送者 WebSocket
-  → Client.readPump
-  → Redis 用户限流
-  → MessageService.SaveText
-  → MySQL：messages + outbox_events（同一事务）
-  → Redis：增加接收者未读数
-  → 发送者收到 ack
-
-Outbox Dispatcher
-  → RabbitMQ message.created
-  ├→ 接收者所在节点 Hub：WebSocket 实时推送
-  └→ Elasticsearch：建立搜索索引
-~~~
-
-接收者离线时不会执行实时推送，但消息仍保存在 MySQL，可通过会话历史或离线消息接口获取。
-
-## AI 聊天
-
-启用后，服务会在启动时自动创建机器人账号（用户名由 `IM_AI_BOT_USERNAME` 指定，默认 `ai_assistant`），新注册用户自动与其成为好友。用户像与普通好友聊天一样给机器人发消息，服务端调用大模型，并把回复作为「机器人 → 用户」的消息异步保存，复用现有的 Outbox → RabbitMQ → WebSocket 推送链路；离线时也可通过 `/api/offline` 拉取。
-
-接入均为 OpenAI 兼容协议，只需改 `IM_AI_BASE_URL`、`IM_AI_MODEL` 与 `IM_AI_API_KEY`：
-
-~~~powershell
-. .\scripts\Set-DevEnv.ps1
-$env:IM_AI_ENABLED = "true"
-$env:IM_AI_API_KEY  = "你的 DeepSeek API Key"
-go run .\cmd\server
-~~~
-
-- DeepSeek：保持默认 `IM_AI_BASE_URL` 与 `IM_AI_MODEL`，填入 API Key 即可。
-- 通义千问：`IM_AI_BASE_URL=https://dashscope.aliyuncs.com/compatible-mode/v1`，`IM_AI_MODEL=qwen-plus`。
-- 本地 Ollama：`IM_AI_BASE_URL=http://127.0.0.1:11434/v1`，`IM_AI_MODEL` 填已拉取的模型名（如 `qwen2.5:7b`），`IM_AI_API_KEY` 留空。
-
-机器人回复为整段返回（非流式）；AI 调用在后台异步执行，不会阻塞 WebSocket 收发。前端通过 `username` 识别机器人并显示「AI 好友」标识与「正在思考」提示。
-
-联网搜索（`IM_AI_ENABLE_SEARCH=true` 时）：机器人走 DeepSeek 的 `/responses` 接口并携带 `web_search` 工具，模型自主决定是否需要联网（闲聊不搜、问实时信息才搜），因此仅 DeepSeek 可用；通义千问 / OpenAI / Ollama 请关闭该开关走普通对话。
-
-## 前端开发
-
-前端源码位于 frontend 目录，使用 Vue 3 和 Vite；生产构建产物输出到 web 目录，仍由 Go 服务在 8080 端口提供。“星讯”包含独立欢迎页、桌面三栏单聊工作台、昵称字母头像、文件上传、消息搜索和离线同步。
-
-先启动后端及基础设施：
-
-~~~powershell
-.\scripts\Start-Dev.ps1 -WithInfra
-~~~
-
-再在另一个终端启动 Vite 开发服务器：
-
-~~~powershell
-cd frontend
-npm install
-npm run dev
-~~~
-
-打开 http://127.0.0.1:5173。Vite 会将 /api 请求和 /ws WebSocket 连接代理到 http://127.0.0.1:8080。
-
-构建生产前端：
-
-~~~powershell
-cd frontend
-npm run build
-~~~
-
-该命令会更新 web 目录中的静态资源。
-
-## 测试
-
-~~~powershell
-. .\scripts\Set-DevEnv.ps1
-go test ./...
-~~~
-
-项目将 Go 构建与模块缓存配置在项目内的 .gocache 和 .gomodcache 目录中，避免影响其他本地项目。
+## 项目结构
+
+- `cmd/server` — Go 服务入口
+- `internal` — 业务代码（app / handler / service / repository / ai / mq / outbox 等）
+- `frontend` — Vue 3 前端源码
+- `db` — 数据库 schema 与迁移脚本
+- `scripts` — 开发脚本（启动 / 重置 / 环境变量）
 
 ## 常见问题
 
-### Docker Desktop 未启动
-
-现象：Start-Dev.ps1 提示 Docker engine 不可用。
-
-处理：启动 Docker Desktop，等待状态变为 Engine running 后重新执行启动脚本。
-
-### 服务端启动时连接 MySQL 或 Redis 失败
-
-现象：启动日志出现数据库或 Redis 连接错误。
-
-处理：
-
-1. 使用带 -WithInfra 的启动命令；
-2. 确认 Docker 容器已启动；
-3. 确认没有修改 Set-DevEnv.ps1 中的端口；
-4. 访问 /healthz 验证 MySQL 与 Redis。
-
-### 数据库字段或表不存在
-
-对于已有旧数据库，先执行：
-
-~~~text
-db/migrations/001_add_outbox_events.sql
-~~~
-
-本地开发环境也可以使用 Reset-Db.ps1 重建数据库；该操作会删除原有数据。
-
-### 无法建立 WebSocket
-
-检查以下内容：
-
-1. 是否已登录并传入有效 JWT；
-2. 是否使用子协议列表 ["im-chat", token]；
-3. 当前页面的 Origin 是否包含在 IM_ALLOWED_ORIGINS；
-4. Token 是否已经调用登出接口而进入黑名单。
+- **Docker Desktop 未启动**：先启动 Docker，等待引擎就绪再执行脚本。
+- **8080 被占用 / 消息收不到**：同时跑多个服务进程会抢消息队列导致推送丢失。只保留一个：`Get-Process server | Stop-Process`。
+- **数据库字段缺失**：重新执行 `.\scripts\Start-Dev.ps1 -WithInfra` 或 `Reset-Db.ps1`（会清数据）。
 
 ## 安全说明
 
-- 不要在生产环境使用仓库中的开发 JWT 密钥、MySQL 密码或 MinIO 默认凭据。
-- JWT 密钥至少 32 个字符，并应通过密钥管理系统配置。
-- MinIO Bucket 保持私有，媒体文件通过短时预签名链接访问。
-- HTTP 受保护接口使用 Bearer Token；WebSocket 使用子协议携带 Token。
-- 限流、Token 黑名单、Origin 白名单仅是基础防护，生产部署还应配置 HTTPS、反向代理、日志、监控和备份。
+开发环境使用默认凭据；生产部署务必通过环境变量覆盖 `IM_JWT_SECRET`、数据库与 MinIO 凭据，并启用 TLS。
