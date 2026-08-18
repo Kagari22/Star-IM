@@ -30,7 +30,7 @@ Go (Gin) · Vue 3 (Vite) · MySQL · Redis · RabbitMQ · MinIO · Elasticsearch
 .\scripts\Start-Dev.ps1
 ```
 
-启动后访问 **http://127.0.0.1:8080**，注册账号即可使用。
+启动后访问 **http://127.0.0.1:8080** ，注册账号即可使用。
 
 ### 启用 AI 联网搜索好友
 
