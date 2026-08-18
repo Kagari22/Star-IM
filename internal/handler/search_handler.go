@@ -19,7 +19,8 @@ func NewSearchHandler(indexer search.Indexer, messages *service.MessageService) 
 	return &SearchHandler{indexer: indexer, messages: messages}
 }
 
-// 搜索当前用户有权限查看的聊天消息
+// SearchMessages returns messages visible to the current user. A search can
+// target a private conversation (peer_id) or a group (group_id), but not both.
 func (h *SearchHandler) SearchMessages(w http.ResponseWriter, r *http.Request) {
 	claims, ok := ClaimsFromContext(r.Context())
 	if !ok {
@@ -28,29 +29,39 @@ func (h *SearchHandler) SearchMessages(w http.ResponseWriter, r *http.Request) {
 	}
 
 	query := r.URL.Query().Get("q")
-	if utf8.RuneCountInString(query) > 64 { // 限制搜索关键词最多 64 个 Unicode 字符
+	if utf8.RuneCountInString(query) > 64 {
 		httpx.WriteError(w, http.StatusBadRequest, "query must be at most 64 characters")
 		return
 	}
-	peerID, _ := strconv.ParseInt(r.URL.Query().Get("peer_id"), 10, 64) // 只搜索当前用户与 peerID 对应的用户的会话
-	limit, err := parseBoundedLimit(r.URL.Query().Get("limit"), 50) // 解析结果数量, 默认 50、最多 50, 避免一次返回大量搜索结果
+	peerID, _ := strconv.ParseInt(r.URL.Query().Get("peer_id"), 10, 64)
+	groupID, _ := strconv.ParseInt(r.URL.Query().Get("group_id"), 10, 64)
+	if peerID > 0 && groupID > 0 {
+		httpx.WriteError(w, http.StatusBadRequest, "peer_id and group_id cannot be used together")
+		return
+	}
+	if groupID > 0 {
+		allowed, err := h.messages.CanAccessGroup(r.Context(), claims.UserID, groupID)
+		if err != nil {
+			httpx.WriteError(w, http.StatusInternalServerError, err.Error())
+			return
+		}
+		if !allowed {
+			httpx.WriteError(w, http.StatusForbidden, "you are not a member of this group")
+			return
+		}
+	}
+
+	limit, err := parseBoundedLimit(r.URL.Query().Get("limit"), 50)
 	if err != nil {
 		httpx.WriteError(w, http.StatusBadRequest, err.Error())
 		return
 	}
-	/*
-	调用 Elasticsearch 搜索当前用户有权限查看的消息
-	-> claims.UserID: 当前登录用户, 用于权限过滤
-	-> query: 关键词
-	-> peerID: 可选的会话限定
-	-> limit: 结构数量上限
-	*/
-	messages, err := h.indexer.SearchMessages(r.Context(), claims.UserID, query, peerID, limit)
+	messages, err := h.indexer.SearchMessages(r.Context(), claims.UserID, query, peerID, groupID, limit)
 	if err != nil {
 		httpx.WriteError(w, http.StatusInternalServerError, err.Error())
 		return
 	}
-	messages, err = h.messages.EnrichMessages(r.Context(), messages) // 给搜索结果中的媒体消息补全可访问的文件 URL
+	messages, err = h.messages.EnrichMessages(r.Context(), messages)
 	if err != nil {
 		httpx.WriteError(w, http.StatusServiceUnavailable, "media URL service unavailable")
 		return

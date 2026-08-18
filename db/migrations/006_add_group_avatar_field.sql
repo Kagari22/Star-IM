@@ -1,0 +1,1 @@
+ALTER TABLE chat_groups ADD COLUMN avatar_key VARCHAR(255) NOT NULL DEFAULT '';

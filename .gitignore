@@ -1,5 +1,6 @@
 # Go 本地缓存与构建产物
 .gocache/
+.gocache-build/
 .gomodcache/
 *.exe
 
@@ -7,10 +8,19 @@
 node_modules/
 frontend/node_modules/
 
+# 前端构建产物（npm run build 重新生成）
+web/
+
+# WorkBuddy 项目数据（本地记忆等，不随仓库分发）
+.workbuddy/
+
 # 本地工具、日志和敏感配置
 .cph/
 .docx-venv/
+.freebuff/
+.zcode/
 *.log
 .env
 .env.*
 !.env.example
+scripts/secrets.ps1

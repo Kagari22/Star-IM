@@ -55,11 +55,13 @@ func WithAuth(secret string, blacklist tokenblacklist.Store, next http.HandlerFu
 	}
 }
 
+// 从请求的 Context 中取出已经解析好的 JWT 用户信息
 func ClaimsFromContext(ctx context.Context) (auth.Claims, bool) {
 	claims, ok := ctx.Value(claimsKey).(auth.Claims) // JWT 解析出的用户信息
 	return claims, ok
 }
 
+// 从 Context 中取出原始 JWT 字符串
 func TokenFromContext(ctx context.Context) (string, bool) {
 	token, ok := ctx.Value(tokenKey).(string) // 原始 JWT 字符串
 	return token, ok

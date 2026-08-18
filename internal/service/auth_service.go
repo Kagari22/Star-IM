@@ -3,6 +3,7 @@ package service
 import (
 	"context"
 	"errors"
+	"log"
 	"strings"
 	"time"
 
@@ -14,6 +15,8 @@ import (
 type AuthService struct {
 	users     repository.UserRepository
 	tokenSpan TokenIssuer
+	social    repository.SocialRepository
+	botID     int64
 }
 
 type TokenIssuer interface {
@@ -36,6 +39,12 @@ func NewAuthService(users repository.UserRepository, secret string, ttlHours int
 	}
 }
 
+// SetBotFriend 配置 AI 机器人账号。启用后，新注册的用户会自动与机器人建立双向好友关系。
+func (s *AuthService) SetBotFriend(social repository.SocialRepository, botID int64) {
+	s.social = social
+	s.botID = botID
+}
+
 func (s *AuthService) Register(ctx context.Context, username, password, nickname string) (model.User, error) {
 	username = strings.TrimSpace(username)
 	nickname = strings.TrimSpace(nickname)
@@ -55,7 +64,19 @@ func (s *AuthService) Register(ctx context.Context, username, password, nickname
 		return model.User{}, err
 	}
 
-	return s.users.Create(ctx, username, passwordHash, nickname)
+	user, err := s.users.Create(ctx, username, passwordHash, nickname)
+	if err != nil {
+		return model.User{}, err
+	}
+
+	if s.social != nil && s.botID > 0 && user.ID != s.botID {
+		if err := s.social.EnsureFriendship(ctx, user.ID, s.botID); err != nil {
+			// 加机器人好友失败不应阻塞注册本身。
+			log.Printf("ensure AI bot friendship for user %d: %v", user.ID, err)
+		}
+	}
+
+	return user, nil
 }
 
 func (s *AuthService) Login(ctx context.Context, username, password string) (string, model.User, error) {

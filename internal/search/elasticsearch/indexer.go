@@ -52,6 +52,7 @@ func (i *Indexer) ensureIndex() error {
 	      "id": {"type": "long"},
 	      "from_user_id": {"type": "long"},
 	      "to_user_id": {"type": "long"},
+	      "group_id": {"type": "long"},
 	      "content_type": {"type": "keyword"},
 	      "content": {"type": "text"},
 	      "content_raw": {"type": "keyword", "ignore_above": 32766},
@@ -78,6 +79,7 @@ func (i *Indexer) ensureIndex() error {
 func (i *Indexer) ensureRawSearchFields() error {
 	mapping := `{
 	  "properties": {
+	    "group_id": {"type": "long"},
 	    "content_raw": {"type": "keyword", "ignore_above": 32766},
 	    "file_name_raw": {"type": "keyword", "ignore_above": 32766}
 	  }
@@ -132,6 +134,7 @@ func (i *Indexer) IndexMessage(ctx context.Context, message model.Message) error
 		"id":            message.ID,
 		"from_user_id":  message.FromUserID,
 		"to_user_id":    message.ToUserID,
+		"group_id":      message.GroupID,
 		"content_type":  message.ContentType,
 		"content":       message.Content,
 		"content_raw":   message.Content,
@@ -163,7 +166,7 @@ func (i *Indexer) IndexMessage(ctx context.Context, message model.Message) error
 }
 
 // 从 Elasticsearch 搜索消息
-func (i *Indexer) SearchMessages(ctx context.Context, userID int64, query string, peerID int64, limit int) ([]model.Message, error) {
+func (i *Indexer) SearchMessages(ctx context.Context, userID int64, query string, peerID, groupID int64, limit int) ([]model.Message, error) {
 	if limit <= 0 {
 		limit = 20
 	}
@@ -219,6 +222,9 @@ func (i *Indexer) SearchMessages(ctx context.Context, userID int64, query string
 				"minimum_should_match": 1,
 			},
 		},
+	}
+	if groupID > 0 {
+		filter = []map[string]any{{"term": map[string]any{"group_id": groupID}}}
 	}
 
 	if peerID > 0 {
@@ -286,6 +292,7 @@ func (i *Indexer) SearchMessages(ctx context.Context, userID int64, query string
 					ID          int64  `json:"id"`
 					FromUserID  int64  `json:"from_user_id"`
 					ToUserID    int64  `json:"to_user_id"`
+					GroupID     *int64 `json:"group_id"`
 					ContentType string `json:"content_type"`
 					Content     string `json:"content"`
 					ObjectKey   string `json:"object_key"`
@@ -308,6 +315,7 @@ func (i *Indexer) SearchMessages(ctx context.Context, userID int64, query string
 			ID:          hit.Source.ID,
 			FromUserID:  hit.Source.FromUserID,
 			ToUserID:    hit.Source.ToUserID,
+			GroupID:     hit.Source.GroupID,
 			ContentType: hit.Source.ContentType,
 			Content:     hit.Source.Content,
 			ObjectKey:   hit.Source.ObjectKey,

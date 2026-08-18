@@ -11,6 +11,7 @@
 - 图片、文件上传与 MinIO 临时访问链接
 - RabbitMQ 异步消息事件与 Outbox 可靠投递
 - Elasticsearch 消息关键词与颜文字/特殊字符搜索
+- 可选 AI 聊天机器人：通过 OpenAI 兼容接口（DeepSeek / 通义千问 / OpenAI / 本地 Ollama）接入，机器人作为好友自动回复，并支持联网搜索实时信息
 - “星讯”Vue 3 + Vite 前端：欢迎页、三栏单聊工作台、搜索、上传与离线同步
 
 ## 技术栈
@@ -176,6 +177,15 @@ docker compose down
 | IM_ENABLE_ELASTICSEARCH | true | 是否启用 Elasticsearch |
 | IM_ELASTICSEARCH_URL | http://127.0.0.1:19200 | Elasticsearch 地址 |
 | IM_ELASTICSEARCH_INDEX | messages | 消息索引名称 |
+| IM_AI_ENABLED | false | 是否启用 AI 聊天机器人 |
+| IM_AI_BASE_URL | https://api.deepseek.com/v1 | OpenAI 兼容接口地址 |
+| IM_AI_API_KEY | 空 | API Key，本地 Ollama 可为空 |
+| IM_AI_MODEL | deepseek-chat | 模型名称 |
+| IM_AI_BOT_USERNAME | ai_assistant | 机器人账号用户名 |
+| IM_AI_BOT_NICKNAME | AI 好友 | 机器人昵称 |
+| IM_AI_CONTEXT_MSGS | 20 | 携带的最近历史消息条数 |
+| IM_AI_TIMEOUT_SECS | 60 | 单次调用超时秒数 |
+| IM_AI_ENABLE_SEARCH | true | 是否启用联网搜索（走 DeepSeek /responses + web_search） |
 
 注意：
 
@@ -364,6 +374,27 @@ Outbox Dispatcher
 ~~~
 
 接收者离线时不会执行实时推送，但消息仍保存在 MySQL，可通过会话历史或离线消息接口获取。
+
+## AI 聊天
+
+启用后，服务会在启动时自动创建机器人账号（用户名由 `IM_AI_BOT_USERNAME` 指定，默认 `ai_assistant`），新注册用户自动与其成为好友。用户像与普通好友聊天一样给机器人发消息，服务端调用大模型，并把回复作为「机器人 → 用户」的消息异步保存，复用现有的 Outbox → RabbitMQ → WebSocket 推送链路；离线时也可通过 `/api/offline` 拉取。
+
+接入均为 OpenAI 兼容协议，只需改 `IM_AI_BASE_URL`、`IM_AI_MODEL` 与 `IM_AI_API_KEY`：
+
+~~~powershell
+. .\scripts\Set-DevEnv.ps1
+$env:IM_AI_ENABLED = "true"
+$env:IM_AI_API_KEY  = "你的 DeepSeek API Key"
+go run .\cmd\server
+~~~
+
+- DeepSeek：保持默认 `IM_AI_BASE_URL` 与 `IM_AI_MODEL`，填入 API Key 即可。
+- 通义千问：`IM_AI_BASE_URL=https://dashscope.aliyuncs.com/compatible-mode/v1`，`IM_AI_MODEL=qwen-plus`。
+- 本地 Ollama：`IM_AI_BASE_URL=http://127.0.0.1:11434/v1`，`IM_AI_MODEL` 填已拉取的模型名（如 `qwen2.5:7b`），`IM_AI_API_KEY` 留空。
+
+机器人回复为整段返回（非流式）；AI 调用在后台异步执行，不会阻塞 WebSocket 收发。前端通过 `username` 识别机器人并显示「AI 好友」标识与「正在思考」提示。
+
+联网搜索（`IM_AI_ENABLE_SEARCH=true` 时）：机器人走 DeepSeek 的 `/responses` 接口并携带 `web_search` 工具，模型自主决定是否需要联网（闲聊不搜、问实时信息才搜），因此仅 DeepSeek 可用；通义千问 / OpenAI / Ollama 请关闭该开关走普通对话。
 
 ## 前端开发
 

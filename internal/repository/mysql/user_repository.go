@@ -2,104 +2,145 @@ package mysql
 
 import (
 	"context"
-	"database/sql"
+	crand "crypto/rand"
+	"encoding/binary"
 	"errors"
 
 	"IM_Chat_System/internal/model"
+	"gorm.io/gorm"
 )
 
 type UserRepository struct {
-	db *sql.DB
+	db *gorm.DB
 }
 
-func NewUserRepository(db *sql.DB) *UserRepository {
+func NewUserRepository(db *gorm.DB) *UserRepository {
 	return &UserRepository{db: db}
 }
 
-// 向 MySQL 创建新用户, 并返回数据库中完整的用户对象
+const maxRandomIDRetries = 10
+
+func random8DigitID() int64 {
+	b := make([]byte, 4)
+	_, _ = crand.Read(b)
+	n := binary.BigEndian.Uint32(b)
+	return 10000000 + int64(n%90000000)
+}
+
 func (r *UserRepository) Create(ctx context.Context, username, passwordHash, nickname string) (model.User, error) {
-	result, err := r.db.ExecContext(
-		ctx,
-		`INSERT INTO users (username, password_hash, nickname) VALUES (?, ?, ?)`,
-		username,
-		passwordHash,
-		nickname,
-	)
-	if err != nil {
-		return model.User{}, err
+	for attempt := 0; attempt < maxRandomIDRetries; attempt++ {
+		row := userRow{
+			ID:           random8DigitID(),
+			Username:     username,
+			PasswordHash: passwordHash,
+			Nickname:     nickname,
+		}
+		err := r.db.WithContext(ctx).Create(&row).Error
+		if err == nil {
+			user, ok, err := r.GetByID(ctx, row.ID)
+			if err != nil {
+				return model.User{}, err
+			}
+			if !ok {
+				return model.User{}, errors.New("user inserted but not found")
+			}
+			return user, nil
+		}
+		if !errors.Is(err, gorm.ErrDuplicatedKey) {
+			return model.User{}, err
+		}
 	}
-
-	// 获取数据库自动生成的用户 ID
-	id, err := result.LastInsertId()
-	if err != nil {
-		return model.User{}, err
-	}
-
-	// 根据刚插入的 ID 重新查询完整用户信息, 获取数据库生成的字段
-	user, ok, err := r.GetByID(ctx, id)
-	if err != nil {
-		return model.User{}, err
-	}
-	if !ok {
-		return model.User{}, errors.New("user inserted but not found")
-	}
-	return user, nil
+	return model.User{}, errors.New("failed to generate unique user id")
 }
 
-// 根据用户 ID 查询用户信息, 并区分"用户不存在"和"数据库查询失败"
 func (r *UserRepository) GetByID(ctx context.Context, id int64) (model.User, bool, error) {
-	var user model.User
-	err := r.db.QueryRowContext(
-		ctx,
-		`SELECT id, username, password_hash, nickname, created_at FROM users WHERE id = ?`,
-		id,
-	).Scan(&user.ID, &user.Username, &user.PasswordHash, &user.Nickname, &user.CreatedAt)
-	if errors.Is(err, sql.ErrNoRows) {
+	var row userRow
+	err := r.db.WithContext(ctx).First(&row, id).Error
+	if errors.Is(err, gorm.ErrRecordNotFound) {
 		return model.User{}, false, nil
 	}
 	if err != nil {
 		return model.User{}, false, err
 	}
-	return user, true, nil
+	return row.model(), true, nil
 }
 
-// 根据用户名查询用户, 主要服务于登录和用户名唯一性校验
 func (r *UserRepository) GetByUsername(ctx context.Context, username string) (model.User, bool, error) {
-	var user model.User
-	err := r.db.QueryRowContext(
-		ctx,
-		`SELECT id, username, password_hash, nickname, created_at FROM users WHERE username = ?`,
-		username,
-	).Scan(&user.ID, &user.Username, &user.PasswordHash, &user.Nickname, &user.CreatedAt)
-	if errors.Is(err, sql.ErrNoRows) {
+	var row userRow
+	err := r.db.WithContext(ctx).Where("username = ?", username).First(&row).Error
+	if errors.Is(err, gorm.ErrRecordNotFound) {
 		return model.User{}, false, nil
 	}
 	if err != nil {
 		return model.User{}, false, err
 	}
-	return user, true, nil
+	return row.model(), true, nil
 }
 
-// 用于查询用户列表, 通常用于展示聊天成员列表, 并排除当前登录用户
 func (r *UserRepository) List(ctx context.Context, excludeUserID int64) ([]model.User, error) {
-	rows, err := r.db.QueryContext(
-		ctx,
-		`SELECT id, username, password_hash, nickname, created_at FROM users WHERE id <> ? ORDER BY id ASC`,
-		excludeUserID,
-	)
-	if err != nil {
+	var rows []userRow
+	if err := r.db.WithContext(ctx).
+		Where("id <> ?", excludeUserID).
+		Order("id ASC").
+		Find(&rows).Error; err != nil {
 		return nil, err
 	}
-	defer rows.Close()
 
-	var users []model.User
-	for rows.Next() {
-		var user model.User
-		if err := rows.Scan(&user.ID, &user.Username, &user.PasswordHash, &user.Nickname, &user.CreatedAt); err != nil {
-			return nil, err
-		}
+	users := make([]model.User, 0, len(rows))
+	for _, row := range rows {
+		user := row.model()
 		user.PasswordHash = ""
 		users = append(users, user)
 	}
-	return users, rows.Err()
+	return users, nil
+}
+
+// 按用户名 / 昵称模糊匹配或按 ID 精确匹配
+func (r *UserRepository) SearchUsers(ctx context.Context, query string, excludeUserID int64, limit int) ([]model.User, error) {
+	var rows []userRow
+	pattern := "%" + query + "%"
+	err := r.db.WithContext(ctx).
+		Where("id <> ?", excludeUserID).
+		Where("username LIKE ? OR nickname LIKE ? OR CAST(id AS CHAR) = ?", pattern, pattern, query).
+		Order("id ASC").
+		Limit(limit).
+		Find(&rows).Error
+	if err != nil {
+		return nil, err
+	}
+
+	users := make([]model.User, 0, len(rows))
+	for _, row := range rows {
+		user := row.model()
+		user.PasswordHash = ""
+		users = append(users, user)
+	}
+	return users, nil
+}
+
+func (r *UserRepository) UpdateNickname(ctx context.Context, id int64, nickname string) (model.User, bool, error) {
+	if err := r.db.WithContext(ctx).
+		Model(&userRow{}).
+		Where("id = ?", id).
+		Update("nickname", nickname).Error; err != nil {
+		return model.User{}, false, err
+	}
+
+	// 不要只依赖 RowsAffected 的结果, 而是重新查询一次: 
+	// 因为当修改后的昵称和原昵称相同时, MySQL 可能会返回影响行数为 0
+	return r.GetByID(ctx, id)
+}
+
+func (r *UserRepository) UpdateAvatarKey(ctx context.Context, id int64, avatarKey string) error {
+	return r.db.WithContext(ctx).
+		Model(&userRow{}).
+		Where("id = ?", id).
+		Update("avatar_key", avatarKey).Error
+}
+
+func (r *UserRepository) UpdatePassword(ctx context.Context, id int64, passwordHash string) error {
+	return r.db.WithContext(ctx).
+		Model(&userRow{}).
+		Where("id = ?", id).
+		Update("password_hash", passwordHash).Error
 }

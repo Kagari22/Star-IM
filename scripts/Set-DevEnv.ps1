@@ -29,6 +29,24 @@ $env:IM_ENABLE_ELASTICSEARCH = "true"
 $env:IM_ELASTICSEARCH_URL = "http://127.0.0.1:19200"
 $env:IM_ELASTICSEARCH_INDEX = "messages"
 
+# AI chat bot (OpenAI-compatible, DeepSeek by default).
+# IM_AI_API_KEY is not set here; export it before starting, e.g.:
+#   $env:IM_AI_API_KEY = "your-deepseek-api-key"
+# Bot nickname deliberately not set here: PowerShell 5.1 misreads UTF-8
+# Chinese literals in BOM-less scripts, so the Go default is used instead.
+$env:IM_AI_ENABLED = "true"
+if (-not $env:IM_AI_BASE_URL) { $env:IM_AI_BASE_URL = "https://api.deepseek.com/v1" }
+if (-not $env:IM_AI_MODEL) { $env:IM_AI_MODEL = "deepseek-chat" }
+if (-not $env:IM_AI_BOT_USERNAME) { $env:IM_AI_BOT_USERNAME = "ai_assistant" }
+
+# Load local secrets (IM_AI_API_KEY etc.) from scripts/secrets.ps1.
+# That file is gitignored so the key never enters version control.
+$secretsFile = Join-Path $PSScriptRoot "secrets.ps1"
+if (Test-Path $secretsFile) { . $secretsFile }
+if ($env:IM_AI_ENABLED -eq "true" -and (-not $env:IM_AI_API_KEY -or $env:IM_AI_API_KEY -like "*paste-your*")) {
+    Write-Warning "IM_AI_ENABLED=true but IM_AI_API_KEY is empty or still the placeholder; AI replies will fail with 401. Put the real key in scripts/secrets.ps1."
+}
+
 $env:GOCACHE = Join-Path $root ".gocache"
 $env:GOMODCACHE = Join-Path $root ".gomodcache"
 

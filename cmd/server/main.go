@@ -33,18 +33,22 @@ func main() {
 		MaxHeaderBytes:    1 << 20,
 	}
 
-	go func() {
-		log.Println("server listening on", a.Config.HTTPAddr)
-		if err := server.ListenAndServe(); err != nil && !errors.Is(err, http.ErrServerClosed) {
-			log.Printf("server error: %v", err)
-		}
-	}()
-
 	stop := make(chan os.Signal, 1)
 	// 注册需要监听的退出信号
 	// os.Interrupt -> 用户在终端按 Ctrl + C
 	// syscall.SIGTERM -> 操作系统、Docker、进程管理器请求程序正常退出
 	signal.Notify(stop, os.Interrupt, syscall.SIGTERM)
+
+	go func() {
+		log.Println("server listening on", a.Config.HTTPAddr)
+		if err := server.ListenAndServe(); err != nil && !errors.Is(err, http.ErrServerClosed) {
+			log.Printf("server error: %v", err)
+			// 端口被占用等致命错误：主动退出，避免"僵尸实例"继续消费
+			// RabbitMQ 队列，与正常实例抢消息导致实时推送丢失。
+			stop <- os.Interrupt
+		}
+	}()
+
 	<-stop
 	log.Println("shutting down server")
 	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)

@@ -32,6 +32,15 @@ type Config struct {
 	ElasticsearchIndex  string
 	AllowedOrigins      []string
 	MaxUploadBytes      int64
+	EnableAI            bool
+	AIBaseURL           string
+	AIAPIKey            string
+	AIModel             string
+	AIBotUsername       string
+	AIBotNickname       string
+	AIContextMsgs       int
+	AITimeoutSecs       int
+	AIEnableSearch      bool
 }
 
 func Load() Config {
@@ -59,6 +68,15 @@ func Load() Config {
 		ElasticsearchIndex:  getenv("IM_ELASTICSEARCH_INDEX", "messages"),
 		AllowedOrigins:      splitCSV(getenv("IM_ALLOWED_ORIGINS", "http://127.0.0.1:8080,http://localhost:8080,http://127.0.0.1:5173,http://localhost:5173")),
 		MaxUploadBytes:      int64(getenvInt("IM_MAX_UPLOAD_BYTES", 10<<20)),
+		EnableAI:            getenvBool("IM_AI_ENABLED", false),
+		AIBaseURL:           getenv("IM_AI_BASE_URL", "https://api.deepseek.com/v1"),
+		AIAPIKey:            os.Getenv("IM_AI_API_KEY"),
+		AIModel:             getenv("IM_AI_MODEL", "deepseek-chat"),
+		AIBotUsername:       getenv("IM_AI_BOT_USERNAME", "ai_assistant"),
+		AIBotNickname:       getenv("IM_AI_BOT_NICKNAME", "AI 好友"),
+		AIContextMsgs:       getenvInt("IM_AI_CONTEXT_MSGS", 20),
+		AITimeoutSecs:       getenvInt("IM_AI_TIMEOUT_SECS", 60),
+		AIEnableSearch:      getenvBool("IM_AI_ENABLE_SEARCH", true),
 	}
 }
 
@@ -80,6 +98,23 @@ func (c Config) Validate() error {
 	}
 	if c.EnableElasticsearch && !c.EnableRabbitMQ {
 		return fmt.Errorf("RabbitMQ must be enabled when Elasticsearch indexing is enabled")
+	}
+	if c.EnableAI {
+		if strings.TrimSpace(c.AIBaseURL) == "" {
+			return fmt.Errorf("IM_AI_BASE_URL is required when AI is enabled")
+		}
+		if strings.TrimSpace(c.AIModel) == "" {
+			return fmt.Errorf("IM_AI_MODEL is required when AI is enabled")
+		}
+		if strings.TrimSpace(c.AIBotUsername) == "" {
+			return fmt.Errorf("IM_AI_BOT_USERNAME is required when AI is enabled")
+		}
+		if c.AIContextMsgs <= 0 {
+			return fmt.Errorf("IM_AI_CONTEXT_MSGS must be positive when AI is enabled")
+		}
+		if c.AITimeoutSecs <= 0 {
+			return fmt.Errorf("IM_AI_TIMEOUT_SECS must be positive when AI is enabled")
+		}
 	}
 	if len(c.AllowedOrigins) == 0 {
 		return fmt.Errorf("IM_ALLOWED_ORIGINS must contain at least one origin")

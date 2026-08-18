@@ -28,33 +28,39 @@ const (
 )
 
 type Hub struct {
-	mu        sync.RWMutex // 保护 clients 这张 map。因为多个 WebSocket goroutine 会同时连接、断开、查找用户，普通 map 并发读写会崩溃。
-	clients   map[int64]*Client // 当前节点的 WebSocket 客户端连接表
-	secret    string // JWT 密钥, WebSocket 握手时也需要验证身份
-	nodeID    string // 当前服务节点标识
+	mu        sync.RWMutex            // 保护 clients 这张 map。因为多个 WebSocket goroutine 会同时连接、断开、查找用户，普通 map 并发读写会崩溃。
+	clients   map[int64]*Client       // 当前节点的 WebSocket 客户端连接表
+	secret    string                  // JWT 密钥, WebSocket 握手时也需要验证身份
+	nodeID    string                  // 当前服务节点标识
 	messages  *service.MessageService // 消息业务服务。收到 WebSocket 消息后，调用它校验、持久化到 MySQL、更新未读数等。
-	presence  presence.Store // 在线状态存储，一般使用 Redis。用于记录或查询"用户在线、在哪个节点在线"。
-	blacklist tokenblacklist.Store // Token 黑名单存储。用户登出后，JWT 即使尚未过期，也能拒绝其 WebSocket 连接或后续消息。
-	limiter   ratelimit.Store // 消息发送限流，例如限制一个用户每分钟发送的消息数，避免刷屏或恶意消耗资源。
-	origins   map[string]struct{} // WebSocket 允许来源白名单
+	presence  presence.Store          // 在线状态存储，一般使用 Redis。用于记录或查询"用户在线、在哪个节点在线"。
+	blacklist tokenblacklist.Store    // Token 黑名单存储。用户登出后，JWT 即使尚未过期，也能拒绝其 WebSocket 连接或后续消息。
+	limiter   ratelimit.Store         // 消息发送限流，例如限制一个用户每分钟发送的消息数，避免刷屏或恶意消耗资源。
+	origins   map[string]struct{}     // WebSocket 允许来源白名单
 }
 
 type Client struct {
 	userID int64
 	conn   *websocket.Conn // Gorilla WebSocket 的实际连接
-	send   chan any // 服务端要推送给该客户端的消息队列
-	hub    *Hub // 指回连接中心
+	send   chan any        // 服务端要推送给该客户端的消息队列
+	hub    *Hub            // 指回连接中心
 }
 
+// 浏览器 → 服务端
 type IncomingMessage struct {
-	Type    string `json:"type"`
-	To      int64  `json:"to"`
-	Content string `json:"content"`
+	Type      string `json:"type"`
+	To        int64  `json:"to"`
+	Content   string `json:"content"`
+	GroupID   *int64 `json:"group_id,omitempty"`
+	ReplyToID *int64 `json:"reply_to_id,omitempty"`
 }
 
+// 服务端 → 浏览器
 type OutgoingMessage struct {
 	Type    string        `json:"type"`
 	Message model.Message `json:"message,omitempty"`
+	To      int64         `json:"to,omitempty"`
+	GroupID *int64        `json:"group_id,omitempty"`
 	Error   string        `json:"error,omitempty"`
 }
 
@@ -128,7 +134,7 @@ func (h *Hub) ServeWS(w http.ResponseWriter, r *http.Request) {
 
 // 从 WebSocket 握手请求的 Sec-WebSocket-Protocol 头中提取身份验证令牌
 func websocketToken(r *http.Request) string {
-	protocols := websocket.Subprotocols(r) 
+	protocols := websocket.Subprotocols(r)
 	if len(protocols) != 2 || protocols[0] != "im-chat" {
 		return ""
 	}
@@ -160,7 +166,7 @@ func (h *Hub) register(client *Client) {
 	if old := h.clients[client.userID]; old != nil {
 		// 如果存在旧连接，主动关闭它
 		// 这样该用户从新设备登录或刷新页面重新建立 WebSocket 时, 旧连接会断开。
-		old.conn.Close() 
+		old.conn.Close()
 	}
 	h.clients[client.userID] = client // 将新连接写入 Hub
 	if h.presence != nil {
@@ -220,7 +226,7 @@ func (c *Client) readPump() {
 	c.conn.SetReadLimit(4096)
 	c.conn.SetReadDeadline(time.Now().Add(pongWait))
 	// 收到 Pong → 再延长 pongWait 时间
-	c.conn.SetPongHandler(func(string) error { 
+	c.conn.SetPongHandler(func(string) error {
 		c.conn.SetReadDeadline(time.Now().Add(pongWait))
 		return nil
 	})
@@ -234,6 +240,10 @@ func (c *Client) readPump() {
 			return
 		}
 
+		if input.Type == "typing" {
+			c.hub.dispatchTyping(c, input)
+			continue
+		}
 		if input.Type != "chat" {
 			c.send <- OutgoingMessage{Type: "error", Error: "unsupported message type"}
 			continue
@@ -252,8 +262,29 @@ func (c *Client) readPump() {
 			}
 		}
 
-		// 限流通过后, 调用消息服务保存文本消息
-		message, err := c.hub.messages.SaveText(context.Background(), c.userID, input.To, input.Content)
+		var (
+			message model.Message
+			err     error
+		)
+
+		if input.GroupID != nil {
+			message, err = c.hub.messages.SaveGroupTextReply(
+				context.Background(),
+				c.userID,
+				*input.GroupID,
+				input.Content,
+				input.ReplyToID,
+			)
+		} else {
+			message, err = c.hub.messages.SaveTextReply(
+				context.Background(),
+				c.userID,
+				input.To,
+				input.Content,
+				input.ReplyToID,
+			)
+		}
+
 		if err != nil {
 			c.send <- OutgoingMessage{Type: "error", Error: err.Error()}
 			continue
@@ -313,6 +344,56 @@ func messageRateKey(userID int64) string {
 
 // 消费 RabbitMQ 的 message.created 事件，并在"接收者在线且连接在当前节点"时，将消息实时推送给接收者
 func (h *Hub) DispatchMessageCreated(ctx context.Context, event mq.MessageCreatedEvent) error {
+	if event.EditedAt != nil {
+		return h.DispatchMessageEdited(ctx, event)
+	}
+	if event.RecalledAt != nil {
+		return h.DispatchMessageRecalled(ctx, event)
+	}
+	if event.GroupID != nil {
+		members, err := h.messages.GroupMembers(ctx, *event.GroupID)
+		if err != nil {
+			return err
+		}
+		message, err := h.messages.EnrichMessage(ctx, model.Message{
+			ID:          event.MessageID,
+			FromUserID:  event.FromUserID,
+			GroupID:     event.GroupID,
+			ContentType: event.ContentType,
+			Content:     event.Content,
+			ObjectKey:   event.ObjectKey,
+			ObjectURL:   event.ObjectURL,
+			FileName:    event.FileName,
+			FileSize:    event.FileSize,
+			CreatedAt:   event.CreatedAt,
+			ReplyToID:   event.ReplyToID,
+		})
+		if err != nil {
+			return err
+		}
+		payload := OutgoingMessage{
+			Type:    "chat",
+			Message: message,
+		}
+		for _, member := range members {
+			// 发送者已经收到 ack，不再重复推送 chat
+			if member.UserID == event.FromUserID {
+				continue
+			}
+			if h.presence != nil {
+				nodeID, online, err := h.presence.GetOnlineNode(ctx, member.UserID)
+				if err != nil {
+					return err
+				}
+				if !online || nodeID != h.nodeID {
+					continue
+				}
+			}
+			h.deliver(member.UserID, payload)
+		}
+		return nil
+	}
+
 	if h.presence != nil {
 		nodeID, online, err := h.presence.GetOnlineNode(ctx, event.ToUserID)
 		if err != nil {
@@ -334,6 +415,7 @@ func (h *Hub) DispatchMessageCreated(ctx context.Context, event mq.MessageCreate
 		FileName:    event.FileName,
 		FileSize:    event.FileSize,
 		CreatedAt:   event.CreatedAt,
+		ReplyToID:   event.ReplyToID,
 	})
 	if err != nil {
 		return err
@@ -343,5 +425,89 @@ func (h *Hub) DispatchMessageCreated(ctx context.Context, event mq.MessageCreate
 		Message: message,
 	}
 	h.deliver(event.ToUserID, payload)
+	return nil
+}
+
+func (h *Hub) DispatchMessageEdited(ctx context.Context, event mq.MessageCreatedEvent) error {
+	message := model.Message{ID: event.MessageID, FromUserID: event.FromUserID, ToUserID: event.ToUserID, GroupID: event.GroupID, Content: event.Content, ContentType: event.ContentType, CreatedAt: event.CreatedAt, EditedAt: event.EditedAt, ReplyToID: event.ReplyToID}
+	payload := OutgoingMessage{Type: "edit", Message: message}
+	if event.GroupID != nil {
+		members, err := h.messages.GroupMembers(ctx, *event.GroupID)
+		if err != nil {
+			return err
+		}
+		for _, member := range members {
+			h.deliver(member.UserID, payload)
+		}
+		return nil
+	}
+	h.deliver(event.FromUserID, payload)
+	h.deliver(event.ToUserID, payload)
+	return nil
+}
+
+func (h *Hub) dispatchTyping(client *Client, input IncomingMessage) {
+	payload := OutgoingMessage{Type: "typing", To: client.userID, GroupID: input.GroupID}
+	if input.GroupID != nil {
+		members, err := h.messages.GroupMembers(context.Background(), *input.GroupID)
+		if err != nil {
+			return
+		}
+		for _, member := range members {
+			if member.UserID != client.userID {
+				h.deliver(member.UserID, payload)
+			}
+		}
+		return
+	}
+	if input.To > 0 {
+		h.deliver(input.To, payload)
+	}
+}
+
+// DispatchMessageRecalled broadcasts a recall update to every participant.
+// Unlike a newly-created group message, the sender must also receive this
+// event so that other tabs/devices update their local copy.
+func (h *Hub) DispatchMessageRecalled(ctx context.Context, event mq.MessageCreatedEvent) error {
+	message := model.Message{
+		ID: event.MessageID, FromUserID: event.FromUserID, ToUserID: event.ToUserID,
+		GroupID: event.GroupID, ContentType: event.ContentType, CreatedAt: event.CreatedAt,
+		RecalledAt: event.RecalledAt, RecalledBy: event.RecalledBy, RecallReason: event.RecallReason,
+	}
+	payload := OutgoingMessage{Type: "recall", Message: message}
+	if event.GroupID != nil {
+		members, err := h.messages.GroupMembers(ctx, *event.GroupID)
+		if err != nil {
+			return err
+		}
+		for _, member := range members {
+			if h.presence != nil {
+				nodeID, online, err := h.presence.GetOnlineNode(ctx, member.UserID)
+				if err != nil {
+					return err
+				}
+				if !online || nodeID != h.nodeID {
+					continue
+				}
+			}
+			h.deliver(member.UserID, payload)
+		}
+		return nil
+	}
+	for _, userID := range []int64{event.FromUserID, event.ToUserID} {
+		if userID <= 0 {
+			continue
+		}
+		if h.presence != nil {
+			nodeID, online, err := h.presence.GetOnlineNode(ctx, userID)
+			if err != nil {
+				return err
+			}
+			if !online || nodeID != h.nodeID {
+				continue
+			}
+		}
+		h.deliver(userID, payload)
+	}
 	return nil
 }
