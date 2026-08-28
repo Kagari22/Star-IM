@@ -61,6 +61,7 @@ type App struct {
 	presence  *handler.PresenceHandler
 	groups    *handler.GroupHandler
 	social    *handler.SocialHandler
+	redpacket *handler.RedPacketHandler
 }
 
 // 读取并校验配置
@@ -104,6 +105,7 @@ func New() (*App, error) {
 	messageRepo := mysqlrepo.NewMessageRepository(gormDB)
 	groupRepo := mysqlrepo.NewGroupRepository(gormDB)
 	socialRepo := mysqlrepo.NewSocialRepository(gormDB)
+	redPacketRepo := mysqlrepo.NewRedPacketRepository(gormDB)
 	presenceStore := redisPresence.New(rdb)   // 创建在线状态存储组件
 	unreadStore := redisUnread.New(rdb)       // 创建未读消息存储组件
 	blacklistStore := redisBlacklist.New(rdb) // 创建 JWT 黑名单组件
@@ -275,6 +277,7 @@ func New() (*App, error) {
 	presenceService := service.NewPresenceService(presenceStore)
 	presenceHandler := handler.NewPresenceHandler(presenceService)
 	socialService := service.NewSocialService(userRepo, groupRepo, socialRepo)
+	redPacketService := service.NewRedPacketService(redPacketRepo, groupRepo)
 
 	go dispatcher.Run(runtimeCtx)
 
@@ -298,6 +301,7 @@ func New() (*App, error) {
 		presence:  presenceHandler,
 		groups:    handler.NewGroupHandler(groupService, messageService),
 		social:    handler.NewSocialHandler(socialService),
+		redpacket: handler.NewRedPacketHandler(redPacketService, messageService),
 	}, nil
 }
 
@@ -356,6 +360,23 @@ func (a *App) Router() http.Handler {
 	router.POST("/api/me/avatar", gin.WrapF(handler.WithRateLimit(a.limiter, "avatar-upload", 5, time.Minute, handler.ClientIPKey, handler.WithAuth(a.Config.JWTSecret, a.blacklist, a.users.UploadAvatar))))
 	router.POST("/api/me/password", gin.WrapF(handler.WithRateLimit(a.limiter, "change-password", 3, time.Minute, handler.ClientIPKey, handler.WithAuth(a.Config.JWTSecret, a.blacklist, a.users.ChangePassword))))
 	router.GET("/api/presence", gin.WrapF(handler.WithAuth(a.Config.JWTSecret, a.blacklist, a.presence.Status)))
+	router.GET("/api/balance", gin.WrapF(handler.WithAuth(a.Config.JWTSecret, a.blacklist, a.redpacket.Balance)))
+	router.POST("/api/redeem", gin.WrapF(handler.WithRateLimit(a.limiter, "redeem", 10, time.Minute, handler.ClientIPKey, handler.WithAuth(a.Config.JWTSecret, a.blacklist, a.redpacket.Redeem))))
+	authSendRedPacket := handler.WithAuth(a.Config.JWTSecret, a.blacklist, a.redpacket.SendGroupPacket)
+	router.POST("/api/groups/:id/red-packets", func(c *gin.Context) {
+		c.Request.SetPathValue("id", c.Param("id"))
+		authSendRedPacket(c.Writer, c.Request)
+	})
+	authGrabRedPacket := handler.WithAuth(a.Config.JWTSecret, a.blacklist, a.redpacket.Grab)
+	router.POST("/api/red-packets/:id/grab", func(c *gin.Context) {
+		c.Request.SetPathValue("id", c.Param("id"))
+		authGrabRedPacket(c.Writer, c.Request)
+	})
+	authRedPacketDetail := handler.WithAuth(a.Config.JWTSecret, a.blacklist, a.redpacket.Detail)
+	router.GET("/api/red-packets/:id", func(c *gin.Context) {
+		c.Request.SetPathValue("id", c.Param("id"))
+		authRedPacketDetail(c.Writer, c.Request)
+	})
 	router.POST("/api/groups", gin.WrapF(handler.WithRateLimit(a.limiter, "group-create", 10, time.Minute, handler.ClientIPKey, handler.WithAuth(a.Config.JWTSecret, a.blacklist, a.groups.Create))))
 	router.GET("/api/groups", gin.WrapF(handler.WithAuth(a.Config.JWTSecret, a.blacklist, a.groups.List)))
 	authSearchGroup := handler.WithAuth(a.Config.JWTSecret, a.blacklist, a.social.SearchGroup)

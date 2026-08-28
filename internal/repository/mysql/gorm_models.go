@@ -16,6 +16,7 @@ type userRow struct {
 	PasswordHash string    `gorm:"column:password_hash"`
 	Nickname     string    `gorm:"column:nickname"`
 	AvatarKey    string    `gorm:"column:avatar_key"`
+	Balance      int64     `gorm:"column:balance"`
 	CreatedAt    time.Time `gorm:"column:created_at"`
 }
 

@@ -327,11 +327,23 @@ func (s *MessageService) SaveGroupText(ctx context.Context, fromUserID, groupID 
 
 func (s *MessageService) SaveGroupTextReply(ctx context.Context, fromUserID, groupID int64, content string, replyToID *int64) (model.Message, error) {
 	content = strings.TrimSpace(content)
-	if groupID <= 0 {
-		return model.Message{}, errors.New("group_id is required")
-	}
 	if content == "" {
 		return model.Message{}, errors.New("content is required")
+	}
+	return s.saveGroupMessage(ctx, fromUserID, groupID, "text", content, replyToID)
+}
+
+// SaveGroupRedPacket 在群里发送一条红包消息。content 存红包 ID，前端据此渲染红包卡片。
+func (s *MessageService) SaveGroupRedPacket(ctx context.Context, fromUserID, groupID, packetID int64) (model.Message, error) {
+	if packetID <= 0 {
+		return model.Message{}, errors.New("packet_id is required")
+	}
+	return s.saveGroupMessage(ctx, fromUserID, groupID, "red_packet", strconv.FormatInt(packetID, 10), nil)
+}
+
+func (s *MessageService) saveGroupMessage(ctx context.Context, fromUserID, groupID int64, contentType, content string, replyToID *int64) (model.Message, error) {
+	if groupID <= 0 {
+		return model.Message{}, errors.New("group_id is required")
 	}
 
 	member, isMember, err := s.groups.IsMember(ctx, groupID, fromUserID)
@@ -358,7 +370,7 @@ func (s *MessageService) SaveGroupTextReply(ctx context.Context, fromUserID, gro
 	message, err := s.messages.SaveAndEnqueue(ctx, model.Message{
 		FromUserID:  fromUserID,
 		GroupID:     &groupID,
-		ContentType: "text",
+		ContentType: contentType,
 		Content:     content,
 		ReplyToID:   replyToID,
 	})

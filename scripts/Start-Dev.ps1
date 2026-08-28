@@ -168,6 +168,18 @@ if ($WithInfra) {
         Write-Host "Database migration 010 applied."
     }
 
+    $hasRedPackets = docker exec im-chat-mysql mysql -N -s -uroot -p123456 -e "SELECT COUNT(*) FROM information_schema.TABLES WHERE TABLE_SCHEMA = 'im_chat' AND TABLE_NAME = 'red_packets';"
+    if ($LASTEXITCODE -ne 0) {
+        throw "database red-packet check failed; the Go server was not started."
+    }
+    if ([int]($hasRedPackets | Select-Object -First 1) -eq 0) {
+        Get-Content .\db\migrations\011_red_packet.sql | docker exec -i im-chat-mysql mysql -uroot -p123456 im_chat
+        if ($LASTEXITCODE -ne 0) {
+            throw "database migration 011 failed; the Go server was not started."
+        }
+        Write-Host "Database migration 011 applied."
+    }
+
     if ((Get-MissingFeatureCount) -gt 0) {
         throw "database migration did not install every required message and group feature; the Go server was not started."
     }

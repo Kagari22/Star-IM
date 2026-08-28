@@ -73,6 +73,19 @@ const settingsAvatarPreview = ref('')
 const settingsAvatarInput = ref(null)
 const savingSettings = ref(false)
 
+const balance = ref(0)
+const redeemOpen = ref(false)
+const redeemCode = ref('')
+const redeeming = ref(false)
+const redPacketOpen = ref(false)
+const redPacketAmount = ref('')
+const redPacketCount = ref(1)
+const redPacketLucky = ref(true)
+const redPacketGreeting = ref('恭喜发财，大吉大利')
+const sendingRedPacket = ref(false)
+const grabbedAmount = ref(0)
+const grabbedShow = ref(false)
+
 const groupManageOpen = ref(false)
 const groupManageAvatarFile = ref(null)
 const groupManageAvatarPreview = ref('')
@@ -165,6 +178,77 @@ async function api(path, options = {}) {
   return data
 }
 
+// ---- 红包 ----
+const cents = (n) => (Number(n || 0) / 100).toFixed(2)
+
+async function loadBalance() {
+  try {
+    const data = await api('/api/balance')
+    balance.value = data.balance || 0
+  } catch { /* 余额获取失败不打断主流程 */ }
+}
+
+async function redeem() {
+  const code = redeemCode.value.trim()
+  if (!code) { showToast('请输入兑换码'); return }
+  redeeming.value = true
+  try {
+    const data = await api('/api/redeem', { method: 'POST', body: JSON.stringify({ code }) })
+    balance.value += data.amount || 0
+    showToast('兑换成功 +' + cents(data.amount) + ' 元')
+    redeemCode.value = ''
+    redeemOpen.value = false
+  } catch (error) {
+    showToast(error.message)
+  } finally {
+    redeeming.value = false
+  }
+}
+
+async function sendRedPacket() {
+  const amount = Math.round(Number(redPacketAmount.value) * 100)
+  const count = Number(redPacketCount.value)
+  if (!amount || amount <= 0) { showToast('请输入有效的金额'); return }
+  if (!count || count <= 0) { showToast('请输入有效的个数'); return }
+  if (count > amount) { showToast('单个红包金额至少 0.01 元'); return }
+  if (!selectedGroup.value) { showToast('请先选择群聊'); return }
+  sendingRedPacket.value = true
+  try {
+    await api('/api/groups/' + selectedGroup.value.id + '/red-packets', {
+      method: 'POST',
+      body: JSON.stringify({
+        amount,
+        count,
+        lucky: redPacketLucky.value,
+        greeting: redPacketGreeting.value || '恭喜发财，大吉大利'
+      })
+    })
+    redPacketOpen.value = false
+    redPacketAmount.value = ''
+    showToast('红包已发出')
+  } catch (error) {
+    showToast(error.message)
+  } finally {
+    sendingRedPacket.value = false
+  }
+}
+
+async function grabRedPacket(message) {
+  const packetID = Number(message.content)
+  if (!packetID) return
+  try {
+    const data = await api('/api/red-packets/' + packetID + '/grab', { method: 'POST' })
+    grabbedAmount.value = data.receipt.amount
+    grabbedShow.value = true
+  } catch (error) {
+    showToast(error.message)
+  }
+}
+
+function redPacketMessage(packetID) {
+  return messages.value.find((m) => m.content_type === 'red_packet' && Number(m.content) === Number(packetID)) || null
+}
+
 async function submitAuth() {
   if (!authForm.value.username || !authForm.value.password) {
     showToast('请填写用户名和密码')
@@ -208,7 +292,7 @@ async function submitAuth() {
 async function bootstrapWorkspace() {
   connectSocket()
   try {
-    await Promise.all([refreshUsers(), refreshGroups(), loadOfflineMessages(), refreshRequests()])
+    await Promise.all([refreshUsers(), refreshGroups(), loadOfflineMessages(), refreshRequests(), loadBalance()])
     startPresencePolling()
   } catch (error) {
     if (error.status === 401) {
@@ -1421,6 +1505,10 @@ onBeforeUnmount(() => {
             <span>@{{ me.username }}</span>
             <span class="identity-id">#{{ me.id }}</span>
           </div>
+          <button class="balance-chip" type="button" title="兑换码充值" @click="redeemOpen = true">
+            <span class="balance-label">余额</span>
+            <strong>¥{{ cents(balance) }}</strong>
+          </button>
           <button class="icon-button" aria-label="设置" title="个人设置" @click="openSettings">⚙</button>
           <button class="icon-button" aria-label="退出登录" title="退出登录" @click="signOut">↗</button>
         </div>
@@ -1612,6 +1700,13 @@ onBeforeUnmount(() => {
                   <p v-if="message.recalled_at" class="recalled-message">{{ Number(message.recalled_by) === Number(me.id) ? '你撤回了一条消息' : '对方撤回了一条消息' }}</p>
                   <template v-else>
                   <button v-if="message.reply_to_id" type="button" class="reply-preview" @click="showToast('引用消息 #' + message.reply_to_id)">回复消息 #{{ message.reply_to_id }}</button>
+                  <button v-if="message.content_type === 'red_packet'" type="button" class="red-packet-card" @click="grabRedPacket(message)">
+                    <span class="red-packet-icon">🧧</span>
+                    <span class="red-packet-body">
+                      <b>拼手气红包</b>
+                      <small>点击领取</small>
+                    </span>
+                  </button>
                   <img v-if="isImage(message)" :src="message.object_url" :alt="message.file_name || '图片消息'" @click="previewImage(message)" />
                   <a v-else-if="isFile(message)" class="file-card" :href="message.object_url" target="_blank" rel="noreferrer">
                     <span class="file-icon">✧</span>
@@ -1656,6 +1751,7 @@ onBeforeUnmount(() => {
             @keydown.enter.exact.prevent="sendMessage"
           ></textarea>
           <div class="composer-actions">
+            <button v-if="selectedGroup" type="button" class="red-packet-btn" title="发红包" @click="redPacketOpen = true">🧧 红包</button>
             <label class="attach-button" title="上传文件">
               <input ref="fileInput" type="file" accept="image/jpeg,image/png,image/gif,image/webp,application/pdf,text/plain" @change="pickFile" />
               <span>＋ 附件</span>
@@ -1900,6 +1996,46 @@ onBeforeUnmount(() => {
             <button type="button" @click="requestGroupJoin(group)">申请加入</button>
           </div>
         </div>
+      </div>
+    </div>
+
+    <div v-if="redeemOpen" class="group-modal-backdrop" @click.self="redeemOpen = false">
+      <div class="group-modal red-packet-modal">
+        <div class="group-modal-head">
+          <div><h2>兑换码充值</h2></div>
+          <button class="icon-button" type="button" title="关闭" @click="redeemOpen = false">×</button>
+        </div>
+        <input v-model.trim="redeemCode" placeholder="输入兑换码" @keyup.enter="redeem" autofocus />
+        <div class="group-modal-actions">
+          <button class="secondary-action" type="button" @click="redeemOpen = false">取消</button>
+          <button class="primary-action" type="button" :disabled="redeeming || !redeemCode.trim()" @click="redeem">兑换</button>
+        </div>
+      </div>
+    </div>
+
+    <div v-if="redPacketOpen" class="group-modal-backdrop" @click.self="redPacketOpen = false">
+      <form class="group-modal red-packet-modal" @submit.prevent="sendRedPacket">
+        <div class="group-modal-head">
+          <div><h2>发红包</h2></div>
+          <button class="icon-button" type="button" title="关闭" @click="redPacketOpen = false">×</button>
+        </div>
+        <label class="red-packet-field"><span>金额（元）</span><input v-model="redPacketAmount" type="number" min="0.01" step="0.01" placeholder="0.00" /></label>
+        <label class="red-packet-field"><span>个数</span><input v-model.number="redPacketCount" type="number" min="1" /></label>
+        <label class="red-packet-lucky"><input v-model="redPacketLucky" type="checkbox" /> 拼手气红包（随机金额）</label>
+        <input v-model="redPacketGreeting" class="red-packet-greeting" maxlength="50" placeholder="祝福语（可选）" />
+        <div class="group-modal-actions">
+          <button class="secondary-action" type="button" @click="redPacketOpen = false">取消</button>
+          <button class="primary-action" type="submit" :disabled="sendingRedPacket">发红包</button>
+        </div>
+      </form>
+    </div>
+
+    <div v-if="grabbedShow" class="group-modal-backdrop" @click.self="grabbedShow = false">
+      <div class="group-modal red-packet-result-modal">
+        <span class="red-packet-big">🧧</span>
+        <h2>恭喜抢到</h2>
+        <strong class="grabbed-amount">¥{{ cents(grabbedAmount) }}</strong>
+        <button class="primary-action" type="button" @click="grabbedShow = false">收下</button>
       </div>
     </div>
     </Teleport>

@@ -2477,3 +2477,94 @@ button:disabled {
     transition-duration: 0.01ms !important;
   }
 }
+
+/* ---- 红包 ---- */
+.balance-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.4rem;
+  margin: 0 0.25rem 0 0;
+  padding: 0.35rem 0.65rem;
+  border: 2px solid var(--ink);
+  border-radius: 0.7rem;
+  background: var(--paper-soft);
+  color: var(--text);
+  cursor: pointer;
+  transition: transform 0.15s;
+}
+.balance-chip:hover { transform: translateY(-1px); }
+.balance-chip .balance-label { color: var(--muted); font-size: 0.65rem; }
+.balance-chip strong { color: #e6494a; }
+
+.red-packet-btn {
+  flex-shrink: 0;
+  padding: 0.45rem 0.75rem;
+  border: 2px solid #e6494a;
+  border-radius: 0.7rem;
+  background: #e6494a;
+  color: #fff;
+  font-weight: 700;
+  cursor: pointer;
+  box-shadow: 2px 2px 0 rgba(0, 0, 0, 0.2);
+}
+.red-packet-btn:hover { background: #d13b3c; }
+
+.red-packet-card {
+  display: flex;
+  align-items: center;
+  gap: 0.6rem;
+  max-width: 15rem;
+  padding: 0.6rem 0.85rem;
+  border: none;
+  border-radius: 0.8rem;
+  background: linear-gradient(135deg, #ff6b5e, #e6494a);
+  color: #fff;
+  cursor: pointer;
+  text-align: left;
+  box-shadow: 2px 2px 0 rgba(0, 0, 0, 0.18);
+  transition: transform 0.15s;
+}
+.red-packet-card:hover { transform: translateY(-2px); }
+.red-packet-icon { font-size: 1.9rem; line-height: 1; }
+.red-packet-body { display: flex; flex-direction: column; }
+.red-packet-body b { font-size: 0.95rem; }
+.red-packet-body small { color: #ffe0d8; }
+
+.red-packet-modal { display: flex; flex-direction: column; gap: 0.9rem; }
+.red-packet-field { display: flex; align-items: center; gap: 0.7rem; }
+.red-packet-field span { width: 5.5rem; color: var(--muted); font-size: 0.85rem; }
+.red-packet-field input {
+  flex: 1;
+  padding: 0.5rem 0.7rem;
+  border: 2px solid var(--ink);
+  border-radius: 0.6rem;
+  background: var(--paper);
+  color: var(--text);
+  font-size: 0.95rem;
+}
+.red-packet-lucky {
+  display: flex;
+  align-items: center;
+  gap: 0.45rem;
+  font-size: 0.88rem;
+  color: var(--text);
+  cursor: pointer;
+}
+.red-packet-greeting {
+  padding: 0.5rem 0.7rem;
+  border: 2px solid var(--ink);
+  border-radius: 0.6rem;
+  background: var(--paper);
+  color: var(--text);
+}
+
+.red-packet-result-modal {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 0.6rem;
+  padding: 1.6rem;
+  text-align: center;
+}
+.red-packet-big { font-size: 3.2rem; line-height: 1; }
+.grabbed-amount { font-size: 2.1rem; color: #e6494a; font-weight: 800; }
