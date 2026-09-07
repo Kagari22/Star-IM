@@ -32,5 +32,4 @@ type Message struct {
 	ReplyPreview string     `json:"reply_preview,omitempty"`
 	EditedAt     *time.Time `json:"edited_at,omitempty"`
 	IsFavorite   bool       `json:"is_favorite,omitempty"`
-	IsPinned     bool       `json:"is_pinned,omitempty"`
 }

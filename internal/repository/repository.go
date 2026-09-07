@@ -28,8 +28,7 @@ type MessageRepository interface {
 	Recall(ctx context.Context, messageID, requesterID int64, deadline time.Time) (model.Message, error)
 	Edit(ctx context.Context, messageID, requesterID int64, content string) (model.Message, error)
 	SetFavorite(ctx context.Context, userID, messageID int64, favorite bool) error
-	SetPinned(ctx context.Context, userID, messageID int64, pinned bool) error
-	ListPinned(ctx context.Context, userID int64, peerID, groupID *int64) ([]model.Message, error)
+	ListFavorite(ctx context.Context, userID int64, peerID, groupID *int64) ([]model.Message, error)
 	MarkRead(ctx context.Context, userID, peerID, groupID, messageID int64) error
 }
 

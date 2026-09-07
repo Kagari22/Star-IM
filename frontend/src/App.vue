@@ -85,6 +85,12 @@ const redPacketGreeting = ref('恭喜发财，大吉大利')
 const sendingRedPacket = ref(false)
 const grabbedAmount = ref(0)
 const grabbedShow = ref(false)
+const redPacketDetails = ref({})
+const redPacketDetail = ref(null)
+const redPacketDetailOpen = ref(false)
+const favoritesOpen = ref(false)
+const favoriteMessages = ref([])
+const loadingFavorites = ref(false)
 
 const groupManageOpen = ref(false)
 const groupManageAvatarFile = ref(null)
@@ -119,9 +125,16 @@ const socketLabel = computed(() => {
   return '离线重连中'
 })
 
+function applyThemeToDocument() {
+  // Teleport 到 body 的弹窗取不到 .app-shell 作用域内的 CSS 变量，
+  // 因此把主题同步到 <html>，让 :root 的变量随之切换。
+  document.documentElement.setAttribute('data-theme', theme.value)
+}
+
 function toggleTheme() {
   theme.value = theme.value === 'dark' ? 'light' : 'dark'
   localStorage.setItem('theme', theme.value)
+  applyThemeToDocument()
 }
 
 function readStoredUser() {
@@ -233,20 +246,78 @@ async function sendRedPacket() {
   }
 }
 
+async function loadRedPacketDetail(packetID) {
+  if (redPacketDetails.value[packetID]) return redPacketDetails.value[packetID]
+  const data = await api('/api/red-packets/' + packetID)
+  redPacketDetails.value[packetID] = data
+  return data
+}
+
+function hasGrabbed(message) {
+  const info = redPacketInfo(message)
+  const detail = redPacketDetails.value[info.id]
+  if (!detail || !detail.receipts) return false
+  return detail.receipts.some((r) => Number(r.user_id) === Number(me.value?.id))
+}
+
 async function grabRedPacket(message) {
-  const packetID = Number(message.content)
+  const packetID = redPacketInfo(message).id
   if (!packetID) return
   try {
     const data = await api('/api/red-packets/' + packetID + '/grab', { method: 'POST' })
     grabbedAmount.value = data.receipt.amount
     grabbedShow.value = true
+    await refreshRedPacketDetail(packetID)
   } catch (error) {
     showToast(error.message)
   }
 }
 
+async function refreshRedPacketDetail(packetID) {
+  try {
+    const data = await api('/api/red-packets/' + packetID)
+    redPacketDetails.value[packetID] = data
+  } catch { /* 详情刷新失败不影响主流程 */ }
+}
+
+// 批量加载消息列表中的红包详情，用于刷新后正确显示"已领取"状态。
+async function preloadRedPacketDetails(list) {
+  const ids = [...new Set(
+    (list || []).filter((m) => m.content_type === 'red_packet').map((m) => redPacketInfo(m).id).filter(Boolean)
+  )]
+  await Promise.allSettled(ids.map((id) => refreshRedPacketDetail(id)))
+}
+
+// 点击红包：已领过则打开领取详情，未领过则抢。
+async function handleRedPacketClick(message) {
+  const packetID = redPacketInfo(message).id
+  if (!packetID) return
+  try {
+    const detail = await loadRedPacketDetail(packetID)
+    redPacketDetails.value[packetID] = detail
+    if (hasGrabbed(message)) {
+      redPacketDetail.value = detail
+      redPacketDetailOpen.value = true
+    } else {
+      await grabRedPacket(message)
+    }
+  } catch (error) {
+    showToast(error.message)
+  }
+}
+
+// 红包消息的 content 是 JSON（{"id":N,"greeting":"..."}），旧数据退化为纯数字 ID。
+function redPacketInfo(message) {
+  try {
+    const obj = JSON.parse(message.content)
+    return { id: Number(obj.id), greeting: obj.greeting || '恭喜发财，大吉大利' }
+  } catch {
+    return { id: Number(message.content), greeting: '恭喜发财，大吉大利' }
+  }
+}
+
 function redPacketMessage(packetID) {
-  return messages.value.find((m) => m.content_type === 'red_packet' && Number(m.content) === Number(packetID)) || null
+  return messages.value.find((m) => m.content_type === 'red_packet' && redPacketInfo(m).id === Number(packetID)) || null
 }
 
 async function submitAuth() {
@@ -507,6 +578,7 @@ async function selectGroup(group) {
     messageSelectionMode.value = false
     selectedMessageIDs.value = []
     groupMembers.value = membersData.members || []
+    preloadRedPacketDetails(messages.value)
     await scrollMessages()
     markConversationRead()
   } catch (error) {
@@ -833,12 +905,40 @@ async function toggleFavorite(message) {
   } catch (error) { showToast(error.message) }
 }
 
-async function togglePin(message) {
+// 打开收藏列表，拉取当前会话的收藏消息。
+async function openFavorites() {
+  favoritesOpen.value = true
+  loadingFavorites.value = true
+  favoriteMessages.value = []
   try {
-    const enabled = !message.is_pinned
-    await api('/api/messages/' + message.id + '/pin', { method: 'PUT', body: JSON.stringify({ enabled }) })
-    message.is_pinned = enabled
-  } catch (error) { showToast(error.message) }
+    const params = selectedGroup.value
+      ? '?group_id=' + selectedGroup.value.id
+      : (selectedPeer.value ? '?peer_id=' + selectedPeer.value.id : '')
+    const data = await api('/api/messages/favorites' + params)
+    favoriteMessages.value = data.messages || []
+  } catch (error) {
+    showToast(error.message)
+  } finally {
+    loadingFavorites.value = false
+  }
+}
+
+// 关闭收藏弹窗并跳转到目标消息。
+function jumpToMessage(message) {
+  favoritesOpen.value = false
+  scrollToMessage(message.id)
+}
+
+// 滚动到指定消息并高亮。
+function scrollToMessage(messageID) {
+  const el = document.getElementById('msg-' + messageID)
+  if (el) {
+    el.scrollIntoView({ behavior: 'smooth', block: 'center' })
+    el.classList.add('flash-highlight')
+    window.setTimeout(() => el.classList.remove('flash-highlight'), 2200)
+  } else {
+    showToast('原消息不在当前会话中或已删除')
+  }
 }
 
 function previewImage(message) { imagePreviewURL.value = message?.object_url || '' }
@@ -1365,6 +1465,7 @@ async function scrollMessages() {
 }
 
 onMounted(() => {
+  applyThemeToDocument()
   window.addEventListener('popstate', handlePopState)
   recallCountdownTimer = window.setInterval(() => {
     recallClock.value = Date.now()
@@ -1505,13 +1606,12 @@ onBeforeUnmount(() => {
             <span>@{{ me.username }}</span>
             <span class="identity-id">#{{ me.id }}</span>
           </div>
-          <button class="balance-chip" type="button" title="兑换码充值" @click="redeemOpen = true">
-            <span class="balance-label">余额</span>
-            <strong>¥{{ cents(balance) }}</strong>
-          </button>
           <button class="icon-button" aria-label="设置" title="个人设置" @click="openSettings">⚙</button>
           <button class="icon-button" aria-label="退出登录" title="退出登录" @click="signOut">↗</button>
         </div>
+        <button class="balance-chip" type="button" title="我的钱包" @click="redeemOpen = true">
+          <span class="balance-label">💰 钱包</span>
+        </button>
 
         <div class="member-heading">
           <div>
@@ -1650,6 +1750,12 @@ onBeforeUnmount(() => {
           </div>
           <button
             v-if="selectedPeer || selectedGroup"
+            class="message-manage-btn favorite-btn"
+            type="button"
+            @click="openFavorites"
+          >★ 收藏</button>
+          <button
+            v-if="selectedPeer || selectedGroup"
             class="message-manage-btn"
             type="button"
             :class="{ active: messageSelectionMode }"
@@ -1676,6 +1782,7 @@ onBeforeUnmount(() => {
             <article
               v-for="message in messages"
               :key="message.id"
+              :id="'msg-' + message.id"
               class="message-row"
               :class="{ mine: isMine(message) }"
             >
@@ -1699,15 +1806,15 @@ onBeforeUnmount(() => {
                 <div class="message-bubble">
                   <p v-if="message.recalled_at" class="recalled-message">{{ Number(message.recalled_by) === Number(me.id) ? '你撤回了一条消息' : '对方撤回了一条消息' }}</p>
                   <template v-else>
-                  <button v-if="message.reply_to_id" type="button" class="reply-preview" @click="showToast('引用消息 #' + message.reply_to_id)">回复消息 #{{ message.reply_to_id }}</button>
-                  <button v-if="message.content_type === 'red_packet'" type="button" class="red-packet-card" @click="grabRedPacket(message)">
+                  <button v-if="message.reply_to_id" type="button" class="reply-preview" @click="scrollToMessage(message.reply_to_id)">回复消息 #{{ message.reply_to_id }}</button>
+                  <button v-if="message.content_type === 'red_packet'" type="button" class="red-packet-card" @click="handleRedPacketClick(message)">
                     <span class="red-packet-icon">🧧</span>
                     <span class="red-packet-body">
-                      <b>拼手气红包</b>
-                      <small>点击领取</small>
+                      <b>{{ redPacketInfo(message).greeting }}</b>
+                      <small>{{ hasGrabbed(message) ? '已领取' : '点击领取' }}</small>
                     </span>
                   </button>
-                  <img v-if="isImage(message)" :src="message.object_url" :alt="message.file_name || '图片消息'" @click="previewImage(message)" />
+                  <img v-else-if="isImage(message)" :src="message.object_url" :alt="message.file_name || '图片消息'" @click="previewImage(message)" />
                   <a v-else-if="isFile(message)" class="file-card" :href="message.object_url" target="_blank" rel="noreferrer">
                     <span class="file-icon">✧</span>
                     <span>
@@ -1722,7 +1829,6 @@ onBeforeUnmount(() => {
                 <div v-if="!message.recalled_at" class="message-tools">
                   <button type="button" @click="startReply(message)">回复</button>
                   <button type="button" @click="toggleFavorite(message)">{{ message.is_favorite ? '取消收藏' : '收藏' }}</button>
-                  <button type="button" @click="togglePin(message)">{{ message.is_pinned ? '取消置顶' : '置顶' }}</button>
                   <button v-if="isMine(message) && message.content_type === 'text'" type="button" @click="startEdit(message)">编辑</button>
                 </div>
                 <button v-if="isMine(message) && !message.recalled_at && recallSecondsLeft(message) > 0" type="button" class="recall-button" @click="recallMessage(message)">撤回（{{ recallSecondsLeft(message) }}秒）</button>
@@ -2002,10 +2108,14 @@ onBeforeUnmount(() => {
     <div v-if="redeemOpen" class="group-modal-backdrop" @click.self="redeemOpen = false">
       <div class="group-modal red-packet-modal">
         <div class="group-modal-head">
-          <div><h2>兑换码充值</h2></div>
+          <div><h2>我的钱包</h2></div>
           <button class="icon-button" type="button" title="关闭" @click="redeemOpen = false">×</button>
         </div>
-        <input v-model.trim="redeemCode" placeholder="输入兑换码" @keyup.enter="redeem" autofocus />
+        <div class="wallet-balance">
+          <span>当前余额</span>
+          <strong>¥{{ cents(balance) }}</strong>
+        </div>
+        <input v-model.trim="redeemCode" placeholder="输入兑换码充值" @keyup.enter="redeem" autofocus />
         <div class="group-modal-actions">
           <button class="secondary-action" type="button" @click="redeemOpen = false">取消</button>
           <button class="primary-action" type="button" :disabled="redeeming || !redeemCode.trim()" @click="redeem">兑换</button>
@@ -2036,6 +2146,44 @@ onBeforeUnmount(() => {
         <h2>恭喜抢到</h2>
         <strong class="grabbed-amount">¥{{ cents(grabbedAmount) }}</strong>
         <button class="primary-action" type="button" @click="grabbedShow = false">收下</button>
+      </div>
+    </div>
+
+    <div v-if="redPacketDetailOpen" class="group-modal-backdrop" @click.self="redPacketDetailOpen = false">
+      <div class="group-modal red-packet-detail-modal">
+        <div class="group-modal-head">
+          <div><h2>{{ redPacketDetail?.packet?.greeting || '红包详情' }}</h2></div>
+          <button class="icon-button" type="button" title="关闭" @click="redPacketDetailOpen = false">×</button>
+        </div>
+        <div class="rp-detail-summary">
+          <span>总金额 <b>¥{{ cents(redPacketDetail?.packet?.total_amount) }}</b></span>
+          <span>已领 <b>{{ redPacketDetail?.receipts?.length || 0 }}</b>/{{ redPacketDetail?.packet?.total_count }} 个</span>
+        </div>
+        <div class="rp-detail-list">
+          <div v-for="r in redPacketDetail?.receipts" :key="r.id" class="rp-detail-row">
+            <span>{{ userNameByID(r.user_id) }}</span>
+            <strong>¥{{ cents(r.amount) }}</strong>
+          </div>
+          <div v-if="!redPacketDetail?.receipts?.length" class="rp-detail-empty">还没有人领取</div>
+        </div>
+      </div>
+    </div>
+
+    <div v-if="favoritesOpen" class="group-modal-backdrop" @click.self="favoritesOpen = false">
+      <div class="group-modal favorite-modal">
+        <div class="group-modal-head">
+          <div><h2>收藏的消息</h2></div>
+          <button class="icon-button" type="button" title="关闭" @click="favoritesOpen = false">×</button>
+        </div>
+        <div v-if="loadingFavorites" class="favorite-empty">加载中…</div>
+        <div v-else class="favorite-list">
+          <button v-for="m in favoriteMessages" :key="m.id" class="favorite-item" @click="jumpToMessage(m)">
+            <span class="favorite-item-author">{{ messageAuthorName(m) }}</span>
+            <p>{{ m.content || m.file_name || '[媒体消息]' }}</p>
+            <small>{{ formatTime(m.created_at) }}</small>
+          </button>
+          <div v-if="!favoriteMessages.length" class="favorite-empty">还没有收藏的消息</div>
+        </div>
       </div>
     </div>
     </Teleport>

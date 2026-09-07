@@ -33,6 +33,7 @@ func (h *RedPacketHandler) Balance(w http.ResponseWriter, r *http.Request) {
 	httpx.WriteJSON(w, http.StatusOK, map[string]any{"balance": balance})
 }
 
+// 兑换码充值接口
 type redeemRequest struct {
 	Code string `json:"code"`
 }
@@ -87,7 +88,7 @@ func (h *RedPacketHandler) SendGroupPacket(w http.ResponseWriter, r *http.Reques
 		return
 	}
 	// 把红包作为一条群消息推送出去，让群成员实时看到红包卡片。
-	if _, err := h.messages.SaveGroupRedPacket(r.Context(), claims.UserID, groupID, packet.ID); err != nil {
+	if _, err := h.messages.SaveGroupRedPacket(r.Context(), claims.UserID, groupID, packet.ID, packet.Greeting); err != nil {
 		httpx.WriteError(w, http.StatusInternalServerError, err.Error())
 		return
 	}

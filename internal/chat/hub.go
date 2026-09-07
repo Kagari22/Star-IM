@@ -376,8 +376,9 @@ func (h *Hub) DispatchMessageCreated(ctx context.Context, event mq.MessageCreate
 			Message: message,
 		}
 		for _, member := range members {
-			// 发送者已经收到 ack，不再重复推送 chat
-			if member.UserID == event.FromUserID {
+			// 发送者通常通过 ack 收到自己的消息，不再重复推送；
+			// 但红包消息走 HTTP 创建（没有 ack），需要额外推送给发送者本人。
+			if member.UserID == event.FromUserID && event.ContentType != "red_packet" {
 				continue
 			}
 			if h.presence != nil {

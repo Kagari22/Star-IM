@@ -156,8 +156,36 @@ func (h *MessageHandler) SetFavorite(w http.ResponseWriter, r *http.Request) {
 	h.setFlag(w, r, h.messages.SetFavorite)
 }
 
-func (h *MessageHandler) SetPinned(w http.ResponseWriter, r *http.Request) {
-	h.setFlag(w, r, h.messages.SetPinned)
+// GET /api/messages/favorites?peer_id= 或 ?group_id= 返回当前会话收藏的消息。
+func (h *MessageHandler) Favorite(w http.ResponseWriter, r *http.Request) {
+	claims, ok := ClaimsFromContext(r.Context())
+	if !ok {
+		httpx.WriteError(w, http.StatusUnauthorized, "invalid token")
+		return
+	}
+	var peerID, groupID *int64
+	if raw := r.URL.Query().Get("peer_id"); raw != "" {
+		id, err := strconv.ParseInt(raw, 10, 64)
+		if err != nil || id <= 0 {
+			httpx.WriteError(w, http.StatusBadRequest, "invalid peer_id")
+			return
+		}
+		peerID = &id
+	}
+	if raw := r.URL.Query().Get("group_id"); raw != "" {
+		id, err := strconv.ParseInt(raw, 10, 64)
+		if err != nil || id <= 0 {
+			httpx.WriteError(w, http.StatusBadRequest, "invalid group_id")
+			return
+		}
+		groupID = &id
+	}
+	messages, err := h.messages.Favorite(r.Context(), claims.UserID, peerID, groupID)
+	if err != nil {
+		httpx.WriteError(w, http.StatusBadRequest, err.Error())
+		return
+	}
+	httpx.WriteJSON(w, http.StatusOK, map[string]any{"messages": messages})
 }
 
 func (h *MessageHandler) setFlag(w http.ResponseWriter, r *http.Request, update func(context.Context, int64, int64, bool) error) {
@@ -181,37 +209,6 @@ func (h *MessageHandler) setFlag(w http.ResponseWriter, r *http.Request, update 
 		return
 	}
 	httpx.WriteJSON(w, http.StatusOK, map[string]any{"status": "ok", "enabled": input.Enabled})
-}
-
-func (h *MessageHandler) Pinned(w http.ResponseWriter, r *http.Request) {
-	claims, ok := ClaimsFromContext(r.Context())
-	if !ok {
-		httpx.WriteError(w, http.StatusUnauthorized, "invalid token")
-		return
-	}
-	var peerID, groupID *int64
-	if raw := r.URL.Query().Get("peer_id"); raw != "" {
-		id, err := strconv.ParseInt(raw, 10, 64)
-		if err != nil || id <= 0 {
-			httpx.WriteError(w, http.StatusBadRequest, "invalid peer_id")
-			return
-		}
-		peerID = &id
-	}
-	if raw := r.URL.Query().Get("group_id"); raw != "" {
-		id, err := strconv.ParseInt(raw, 10, 64)
-		if err != nil || id <= 0 {
-			httpx.WriteError(w, http.StatusBadRequest, "invalid group_id")
-			return
-		}
-		groupID = &id
-	}
-	messages, err := h.messages.Pinned(r.Context(), claims.UserID, peerID, groupID)
-	if err != nil {
-		httpx.WriteError(w, http.StatusBadRequest, err.Error())
-		return
-	}
-	httpx.WriteJSON(w, http.StatusOK, map[string]any{"messages": messages})
 }
 
 type readReceiptRequest struct {

@@ -220,16 +220,12 @@ func (r *MessageRepository) SetFavorite(ctx context.Context, userID, messageID i
 	return r.db.WithContext(ctx).Exec("DELETE FROM message_favorites WHERE user_id = ? AND message_id = ?", userID, messageID).Error
 }
 
-func (r *MessageRepository) SetPinned(ctx context.Context, userID, messageID int64, pinned bool) error {
-	if pinned {
-		return r.db.WithContext(ctx).Exec("INSERT IGNORE INTO message_pins (user_id, message_id) VALUES (?, ?)", userID, messageID).Error
-	}
-	return r.db.WithContext(ctx).Exec("DELETE FROM message_pins WHERE user_id = ? AND message_id = ?", userID, messageID).Error
-}
-
-func (r *MessageRepository) ListPinned(ctx context.Context, userID int64, peerID, groupID *int64) ([]model.Message, error) {
+// ListFavorite 返回当前用户在指定会话（单聊或群聊）中收藏的消息，按收藏时间倒序。
+func (r *MessageRepository) ListFavorite(ctx context.Context, userID int64, peerID, groupID *int64) ([]model.Message, error) {
 	var rows []messageRow
-	query := r.db.WithContext(ctx).Joins("JOIN message_pins ON message_pins.message_id = messages.id AND message_pins.user_id = ?", userID).Order("message_pins.created_at DESC")
+	query := r.db.WithContext(ctx).
+		Joins("JOIN message_favorites ON message_favorites.message_id = messages.id AND message_favorites.user_id = ?", userID).
+		Order("message_favorites.created_at DESC")
 	if peerID != nil {
 		query = query.Where("messages.group_id IS NULL AND ((messages.from_user_id = ? AND messages.to_user_id = ?) OR (messages.from_user_id = ? AND messages.to_user_id = ?))", userID, *peerID, *peerID, userID)
 	}

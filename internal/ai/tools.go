@@ -38,7 +38,7 @@ func ExecTool(ctx context.Context, call ToolCall) string {
 		if t.Spec.Function.Name != call.Function.Name {
 			continue
 		}
-		result, err := t.Exec(ctx, call.Function.Arguments)
+		result, err := t.Exec(ctx, call.Function.Arguments) // 匹配上了才执行
 		if err != nil {
 			return toolErrorJSON(err)
 		}
@@ -187,10 +187,11 @@ func containsStr(list []string, s string) bool {
 	return false
 }
 
+// 把城市名翻译成经纬度坐标
 func geocode(ctx context.Context, city string) (*geoLocation, error) {
 	query := url.Values{}
 	query.Set("name", city)
-	query.Set("count", "1")
+	query.Set("count", "5")
 	query.Set("language", "zh")
 	query.Set("format", "json")
 
@@ -202,6 +203,12 @@ func geocode(ctx context.Context, city string) (*geoLocation, error) {
 	}
 	if len(resp.Results) == 0 {
 		return nil, fmt.Errorf("未找到城市 %q，请换一个更常见的名称", city)
+	}
+	// 同名/同拼音城市（如福州 vs 抚州）容易匹配到国外或外省，优先返回中国境内结果。
+	for i := range resp.Results {
+		if strings.Contains(resp.Results[i].Country, "中国") || strings.EqualFold(resp.Results[i].Country, "china") {
+			return &resp.Results[i], nil
+		}
 	}
 	return &resp.Results[0], nil
 }
@@ -251,23 +258,38 @@ func describeWeatherCode(code int) string {
 	return fmt.Sprintf("未知天气代码 %d", code)
 }
 
+// getJSON 发起 GET 请求并解析 JSON。本机网络对 Open-Meteo 偶发连接失败，
+// 因此失败时最多重试 3 次（含一次），提高天气查询的稳定性。
 func getJSON(ctx context.Context, rawURL string, out interface{}) error {
-	req, err := http.NewRequestWithContext(ctx, http.MethodGet, rawURL, nil)
-	if err != nil {
-		return err
+	var lastErr error
+	for attempt := 0; attempt < 3; attempt++ {
+		if attempt > 0 {
+			select {
+			case <-ctx.Done():
+				return ctx.Err()
+			case <-time.After(time.Duration(attempt) * 400 * time.Millisecond):
+			}
+		}
+		req, err := http.NewRequestWithContext(ctx, http.MethodGet, rawURL, nil)
+		if err != nil {
+			return err
+		}
+		resp, err := weatherHTTP.Do(req)
+		if err != nil {
+			lastErr = err
+			continue
+		}
+		data, err := io.ReadAll(io.LimitReader(resp.Body, 1<<20))
+		resp.Body.Close()
+		if err != nil {
+			lastErr = err
+			continue
+		}
+		if resp.StatusCode != http.StatusOK {
+			lastErr = fmt.Errorf("status %d: %s", resp.StatusCode, truncate(string(data), 200))
+			continue
+		}
+		return json.Unmarshal(data, out)
 	}
-	resp, err := weatherHTTP.Do(req)
-	if err != nil {
-		return err
-	}
-	defer resp.Body.Close()
-
-	data, err := io.ReadAll(io.LimitReader(resp.Body, 1<<20))
-	if err != nil {
-		return err
-	}
-	if resp.StatusCode != http.StatusOK {
-		return fmt.Errorf("status %d: %s", resp.StatusCode, truncate(string(data), 200))
-	}
-	return json.Unmarshal(data, out)
+	return lastErr
 }

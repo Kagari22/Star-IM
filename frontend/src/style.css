@@ -1,9 +1,32 @@
 :root {
+  --ink: #2b2640;
+  --text: #3d3656;
+  --muted: #8079a0;
+  --paper: #ffffff;
+  --paper-soft: #fff2f8;
+  --line: rgba(43, 38, 64, 0.16);
+  --shadow-color: rgba(43, 38, 64, 0.85);
+  --pink: #ff5fa2;
+  --blue: #3fc6ff;
+  --yellow: #ffd23d;
   color: #3d3656;
   background: #fff7fb;
   font-family: -apple-system, "Segoe UI", "PingFang SC", "Microsoft YaHei", "Helvetica Neue", sans-serif;
   font-synthesis: none;
   text-rendering: optimizeLegibility;
+}
+
+:root[data-theme="dark"] {
+  --ink: #f5f1ff;
+  --text: #ede8fb;
+  --muted: #b3a8d1;
+  --paper: #241d38;
+  --paper-soft: #2e2450;
+  --line: rgba(245, 241, 255, 0.16);
+  --shadow-color: rgba(0, 0, 0, 0.55);
+  --pink: #ff7fb8;
+  --blue: #5fd6ff;
+  --yellow: #ffde70;
 }
 
 * {
@@ -2480,12 +2503,14 @@ button:disabled {
 
 /* ---- 红包 ---- */
 .balance-chip {
-  display: inline-flex;
+  display: flex;
   align-items: center;
+  justify-content: center;
   gap: 0.4rem;
-  margin: 0 0.25rem 0 0;
-  padding: 0.35rem 0.65rem;
-  border: 2px solid var(--ink);
+  width: 100%;
+  margin: -0.05rem 0 0;
+  padding: 0.45rem 0.65rem;
+  border: 2px solid var(--line);
   border-radius: 0.7rem;
   background: var(--paper-soft);
   color: var(--text);
@@ -2493,8 +2518,24 @@ button:disabled {
   transition: transform 0.15s;
 }
 .balance-chip:hover { transform: translateY(-1px); }
-.balance-chip .balance-label { color: var(--muted); font-size: 0.65rem; }
-.balance-chip strong { color: #e6494a; }
+.balance-chip .balance-label { color: var(--text); font-size: 0.78rem; font-weight: 600; }
+
+.wallet-balance {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 0.8rem 0.9rem;
+  border: 2px solid var(--line);
+  border-radius: 0.8rem;
+  background: var(--paper);
+  color: var(--muted);
+  font-size: 0.88rem;
+}
+.wallet-balance strong {
+  color: #e6494a;
+  font-size: 1.4rem;
+  font-weight: 800;
+}
 
 .red-packet-btn {
   flex-shrink: 0;
@@ -2568,3 +2609,90 @@ button:disabled {
 }
 .red-packet-big { font-size: 3.2rem; line-height: 1; }
 .grabbed-amount { font-size: 2.1rem; color: #e6494a; font-weight: 800; }
+
+.red-packet-detail-modal {
+  display: flex;
+  flex-direction: column;
+  gap: 0.9rem;
+}
+.rp-detail-summary {
+  display: flex;
+  justify-content: space-between;
+  gap: 1rem;
+  font-size: 0.85rem;
+  color: var(--muted);
+}
+.rp-detail-summary b { color: var(--text); }
+.rp-detail-list {
+  display: flex;
+  flex-direction: column;
+  gap: 0.4rem;
+  max-height: 16rem;
+  overflow-y: auto;
+}
+.rp-detail-row {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  padding: 0.5rem 0.7rem;
+  border: 2px solid var(--line);
+  border-radius: 0.6rem;
+  background: var(--paper-soft);
+  font-size: 0.9rem;
+}
+.rp-detail-row strong { color: #e6494a; }
+.rp-detail-empty {
+  text-align: center;
+  color: var(--muted);
+  font-size: 0.85rem;
+  padding: 0.8rem 0;
+}
+
+/* ---- 收藏消息 ---- */
+.favorite-btn { color: #e6a817; }
+.favorite-modal { display: flex; flex-direction: column; gap: 0.8rem; }
+.favorite-list {
+  display: flex;
+  flex-direction: column;
+  gap: 0.4rem;
+  max-height: 24rem;
+  overflow-y: auto;
+}
+.favorite-item {
+  display: flex;
+  flex-direction: column;
+  gap: 0.2rem;
+  padding: 0.6rem 0.75rem;
+  border: 2px solid var(--line);
+  border-radius: 0.7rem;
+  background: var(--paper-soft);
+  color: var(--text);
+  text-align: left;
+  cursor: pointer;
+  transition: transform 0.15s;
+}
+.favorite-item:hover { transform: translateX(2px); }
+.favorite-item-author { color: var(--muted); font-size: 0.72rem; font-weight: 600; }
+.favorite-item p {
+  margin: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-size: 0.88rem;
+}
+.favorite-item small { color: var(--muted); font-size: 0.7rem; }
+.favorite-empty {
+  padding: 1.2rem 0;
+  text-align: center;
+  color: var(--muted);
+  font-size: 0.85rem;
+}
+
+/* 消息跳转高亮 */
+.flash-highlight {
+  animation: msg-flash 2.2s ease;
+}
+@keyframes msg-flash {
+  0%, 55% { background-color: var(--paper-soft); box-shadow: inset 3px 0 0 var(--pink); }
+  100% { background-color: transparent; }
+}

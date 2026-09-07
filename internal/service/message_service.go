@@ -2,6 +2,7 @@ package service
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"io"
@@ -333,12 +334,16 @@ func (s *MessageService) SaveGroupTextReply(ctx context.Context, fromUserID, gro
 	return s.saveGroupMessage(ctx, fromUserID, groupID, "text", content, replyToID)
 }
 
-// SaveGroupRedPacket 在群里发送一条红包消息。content 存红包 ID，前端据此渲染红包卡片。
-func (s *MessageService) SaveGroupRedPacket(ctx context.Context, fromUserID, groupID, packetID int64) (model.Message, error) {
+// SaveGroupRedPacket 在群里发送一条红包消息。content 存 JSON（含红包 ID 与祝福语），前端据此渲染红包卡片。
+func (s *MessageService) SaveGroupRedPacket(ctx context.Context, fromUserID, groupID, packetID int64, greeting string) (model.Message, error) {
 	if packetID <= 0 {
 		return model.Message{}, errors.New("packet_id is required")
 	}
-	return s.saveGroupMessage(ctx, fromUserID, groupID, "red_packet", strconv.FormatInt(packetID, 10), nil)
+	content, err := json.Marshal(map[string]any{"id": packetID, "greeting": greeting})
+	if err != nil {
+		return model.Message{}, err
+	}
+	return s.saveGroupMessage(ctx, fromUserID, groupID, "red_packet", string(content), nil)
 }
 
 func (s *MessageService) saveGroupMessage(ctx context.Context, fromUserID, groupID int64, contentType, content string, replyToID *int64) (model.Message, error) {
@@ -398,18 +403,9 @@ func (s *MessageService) SetFavorite(ctx context.Context, userID, messageID int6
 	return s.messages.SetFavorite(ctx, userID, messageID, favorite)
 }
 
-func (s *MessageService) SetPinned(ctx context.Context, userID, messageID int64, pinned bool) error {
-	if userID <= 0 || messageID <= 0 {
-		return errors.New("invalid message")
-	}
-	return s.messages.SetPinned(ctx, userID, messageID, pinned)
-}
-
-func (s *MessageService) Pinned(ctx context.Context, userID int64, peerID, groupID *int64) ([]model.Message, error) {
-	if (peerID == nil) == (groupID == nil) {
-		return nil, errors.New("exactly one conversation target is required")
-	}
-	messages, err := s.messages.ListPinned(ctx, userID, peerID, groupID)
+// Favorite 返回当前用户在指定会话中收藏的消息。
+func (s *MessageService) Favorite(ctx context.Context, userID int64, peerID, groupID *int64) ([]model.Message, error) {
+	messages, err := s.messages.ListFavorite(ctx, userID, peerID, groupID)
 	if err != nil {
 		return nil, err
 	}

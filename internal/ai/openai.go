@@ -56,6 +56,7 @@ type chatCompletionResponse struct {
 	} `json:"error,omitempty"`
 }
 
+// 不带工具的问答入口 + 开关路由器
 func (c *OpenAIClient) Complete(ctx context.Context, history []ChatMessage) (string, error) {
 	if c.enableSearch {
 		return c.completeWithSearch(ctx, history)
@@ -178,6 +179,7 @@ func (c *OpenAIClient) CompleteWithTools(ctx context.Context, history []ChatMess
 	return c.completeMessage(ctx, history, tools)
 }
 
+// 把 DeepSeek（以及任何 OpenAI 兼容服务）封装成 Go 可调用对象的 HTTP 客户端
 func (c *OpenAIClient) completeMessage(ctx context.Context, history []ChatMessage, tools []ToolSpec) (ChatMessage, error) {
 	messages := make([]ChatMessage, 0, len(history)+1)
 	if strings.TrimSpace(c.systemPrompt) != "" {
