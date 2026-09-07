@@ -24,3 +24,6 @@ web/
 .env.*
 !.env.example
 scripts/secrets.ps1
+
+# deliverytest 压测账号缓存（内含 JWT token）
+deliverytest-creds.json
